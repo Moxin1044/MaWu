@@ -69,6 +69,9 @@
       <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isFile" @click="translateFile('zh')">🌐 翻译当前文件为中文</div>
       <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isFile" @click="translateFile('en')">🌐 翻译当前文件为英文</div>
       <div class="ctx-sep" v-if="contextMenu.item"></div>
+      <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isFile" @click="auditFile">🛡️ 检查当前文件缺陷与漏洞</div>
+      <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isDirectory" @click="auditDirectory">🛡️ 检查当前目录缺陷与漏洞</div>
+      <div class="ctx-sep" v-if="contextMenu.item"></div>
       <div class="ctx-item" v-if="contextMenu.item" @click="generateReadme">✨ 撰写项目说明</div>
       <div class="ctx-item" v-if="contextMenu.item" @click="translateProject('zh')">🌐 翻译项目语言为中文</div>
       <div class="ctx-item" v-if="contextMenu.item" @click="translateProject('en')">🌐 翻译项目语言为英文</div>
@@ -526,6 +529,126 @@ ${fileInfos}`
     MessagePlugin.success(`翻译完成，共更新 ${translatedCount} 个文件`)
   } else {
     MessagePlugin.warning('未检测到需要翻译的内容')
+  }
+}
+
+async function auditFile() {
+  contextMenu.visible = false
+  if (!contextMenu.item || !contextMenu.item.isFile) return
+
+  MessagePlugin.info('正在分析文件安全漏洞...')
+
+  const content = await window.api.fs.readFile(contextMenu.item.path)
+  if (!content || !content.trim()) {
+    MessagePlugin.error('文件内容为空')
+    return
+  }
+
+  const prompt = `请对当前文件进行专业安全审计，严格按照以下格式输出所有安全缺陷与代码漏洞：
+
+1. 漏洞位置：精确到行号/函数/代码片段
+2. 漏洞原始代码：粘贴存在漏洞的完整代码
+3. 漏洞类型：如SQL注入、XSS、命令注入、文件上传漏洞、越权访问、敏感信息泄露、弱加密、逻辑漏洞等
+4. 漏洞危害：简要说明风险等级与影响
+5. 漏洞修复建议：给出可直接使用的修复代码
+6. 漏洞复现Payload/EXP：提供可触发漏洞的测试代码、参数或请求示例
+
+要求：只输出真实可验证的高危/中危安全漏洞，不输出语法警告、格式建议。
+
+文件 ${contextMenu.item.name} 的内容如下：
+\`\`\`
+${content}
+\`\`\``
+
+  const response = await aiStore.sendToAi(prompt)
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    const reportName = `security-audit-${contextMenu.item.name}.md`
+    const project = projectStore.currentProject
+    const reportPath = project ? project.path + '/' + reportName : contextMenu.item.path.replace(/[^/\\]+$/, reportName)
+    const success = await window.api.fs.writeFile(reportPath, response)
+    if (success) {
+      refreshTree()
+      editorStore.openFile(reportPath)
+      MessagePlugin.success('安全审计报告已生成')
+    } else {
+      MessagePlugin.error('写入报告失败')
+    }
+  } else {
+    MessagePlugin.error(response || '审计失败')
+  }
+}
+
+async function auditDirectory() {
+  contextMenu.visible = false
+  if (!contextMenu.item || !contextMenu.item.isDirectory) return
+
+  MessagePlugin.info('正在扫描目录文件，准备安全审计...')
+
+  const allFiles = await window.api.fs.readdirRecursive(contextMenu.item.path)
+  if (!allFiles || allFiles.length === 0) {
+    MessagePlugin.error('目录下未找到文件')
+    return
+  }
+
+  // Read all file contents
+  const fileEntries: Array<{ path: string; relPath: string; content: string }> = []
+  for (const f of allFiles) {
+    const content = await window.api.fs.readFile(f.path)
+    if (content && content.trim()) {
+      fileEntries.push({ path: f.path, relPath: f.relPath, content })
+    }
+  }
+
+  if (fileEntries.length === 0) {
+    MessagePlugin.error('所有文件均为空')
+    return
+  }
+
+  const batchSize = 5
+  let allReports: string[] = [`# 安全审计报告\n\n目录：${contextMenu.item.name}\n文件数：${fileEntries.length}\n\n---\n`]
+
+  for (let i = 0; i < fileEntries.length; i += batchSize) {
+    const batch = fileEntries.slice(i, i + batchSize)
+    const batchLabel = `(${Math.min(i + batchSize, fileEntries.length)}/${fileEntries.length})`
+    MessagePlugin.info(`正在审计 ${batchLabel}...`)
+
+    const fileInfos = batch.map(f => `--- 文件: ${f.relPath} ---\n${f.content}`).join('\n\n')
+
+    const prompt = `请对当前目录下所有代码文件进行全面安全审计，逐个文件输出安全漏洞，严格遵循以下格式：
+
+1. 文件名与路径
+2. 漏洞位置：行号/函数
+3. 漏洞原始代码：粘贴漏洞代码片段
+4. 漏洞类型：SQL注入 / XSS / 命令注入 / 文件包含 / 越权 / 未授权访问 / 敏感信息泄露 等
+5. 漏洞危害：说明影响范围与风险等级
+6. 修复建议：提供可直接替换的安全代码
+7. 漏洞复现Payload/EXP：提供测试用Payload、请求参数或利用代码
+
+要求：只输出真实安全漏洞，不输出代码风格建议、语法优化等非安全类问题。如果某个文件没有安全漏洞，跳过该文件即可。
+
+以下是所有文件内容：
+${fileInfos}`
+
+    const response = await aiStore.sendToAi(prompt)
+
+    if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+      allReports.push(response)
+    }
+  }
+
+  const fullReport = allReports.join('\n\n---\n\n')
+  const project = projectStore.currentProject
+  const reportName = `security-audit-${contextMenu.item.name}.md`
+  const reportPath = project ? project.path + '/' + reportName : contextMenu.item.path + '/' + reportName
+  const success = await window.api.fs.writeFile(reportPath, fullReport)
+
+  if (success) {
+    refreshTree()
+    editorStore.openFile(reportPath)
+    MessagePlugin.success('安全审计报告已生成')
+  } else {
+    MessagePlugin.error('写入报告失败')
   }
 }
 </script>
