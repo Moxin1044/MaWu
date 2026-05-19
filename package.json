@@ -25,7 +25,8 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         }
       ],
@@ -37,7 +38,46 @@
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": true,
       "shortcutName": "码悟",
-      "artifactName": "码悟-Setup-${version}.${ext}"
+      "artifactName": "码悟-Setup-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64",
+            "armv7l",
+            "ia32"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64",
+            "armv7l",
+            "ia32"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development",
+      "artifactName": "码悟-${version}-linux-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.developer-tools",
+      "artifactName": "码悟-${version}-mac-${arch}.${ext}"
     }
   },
   "dependencies": {

@@ -66,6 +66,8 @@ const api = {
     status: (repoPath: string) => ipcRenderer.invoke('git:status', repoPath),
     add: (repoPath: string, filePath?: string) =>
       ipcRenderer.invoke('git:add', repoPath, filePath),
+    reset: (repoPath: string, filePath?: string) =>
+      ipcRenderer.invoke('git:reset', repoPath, filePath),
     commit: (repoPath: string, message: string) =>
       ipcRenderer.invoke('git:commit', repoPath, message),
     log: (repoPath: string, maxCount?: number) =>
@@ -73,7 +75,28 @@ const api = {
     branches: (repoPath: string) => ipcRenderer.invoke('git:branches', repoPath),
     checkout: (repoPath: string, branch: string) =>
       ipcRenderer.invoke('git:checkout', repoPath, branch),
-    isRepo: (repoPath: string) => ipcRenderer.invoke('git:isRepo', repoPath)
+    createBranch: (repoPath: string, branchName: string) =>
+      ipcRenderer.invoke('git:createBranch', repoPath, branchName),
+    deleteBranch: (repoPath: string, branchName: string) =>
+      ipcRenderer.invoke('git:deleteBranch', repoPath, branchName),
+    renameBranch: (repoPath: string, oldName: string, newName: string) =>
+      ipcRenderer.invoke('git:renameBranch', repoPath, oldName, newName),
+    isRepo: (repoPath: string) => ipcRenderer.invoke('git:isRepo', repoPath),
+    pull: (repoPath: string, remote?: string, branch?: string) =>
+      ipcRenderer.invoke('git:pull', repoPath, remote, branch),
+    push: (repoPath: string, remote?: string, branch?: string) =>
+      ipcRenderer.invoke('git:push', repoPath, remote, branch),
+    fetch: (repoPath: string, remote?: string) =>
+      ipcRenderer.invoke('git:fetch', repoPath, remote),
+    getRemotes: (repoPath: string) => ipcRenderer.invoke('git:getRemotes', repoPath),
+    addRemote: (repoPath: string, name: string, url: string) =>
+      ipcRenderer.invoke('git:addRemote', repoPath, name, url),
+    removeRemote: (repoPath: string, name: string) =>
+      ipcRenderer.invoke('git:removeRemote', repoPath, name),
+    diff: (repoPath: string, filePath?: string) =>
+      ipcRenderer.invoke('git:diff', repoPath, filePath),
+    diffStaged: (repoPath: string, filePath?: string) =>
+      ipcRenderer.invoke('git:diffStaged', repoPath, filePath)
   }
 }
 

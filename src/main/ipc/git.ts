@@ -68,6 +68,21 @@ export function registerGitIpc(): void {
     }
   })
 
+  // Unstage file
+  ipcMain.handle('git:reset', async (_, repoPath: string, filePath?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (filePath) {
+        await git.reset(['HEAD', '--', filePath])
+      } else {
+        await git.reset(['HEAD'])
+      }
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // Commit
   ipcMain.handle('git:commit', async (_, repoPath: string, message: string) => {
     try {
@@ -116,12 +131,146 @@ export function registerGitIpc(): void {
     }
   })
 
+  // Create branch
+  ipcMain.handle('git:createBranch', async (_, repoPath: string, branchName: string) => {
+    try {
+      await getGit(repoPath).checkoutBranch(branchName, 'HEAD')
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  // Delete branch
+  ipcMain.handle('git:deleteBranch', async (_, repoPath: string, branchName: string) => {
+    try {
+      await getGit(repoPath).deleteLocalBranch(branchName)
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  // Rename branch
+  ipcMain.handle('git:renameBranch', async (_, repoPath: string, oldName: string, newName: string) => {
+    try {
+      await getGit(repoPath).raw(['branch', '-m', oldName, newName])
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // Is git repo
   ipcMain.handle('git:isRepo', async (_, repoPath: string) => {
     try {
       return await getGit(repoPath).checkIsRepo()
     } catch {
       return false
+    }
+  })
+
+  // Pull
+  ipcMain.handle('git:pull', async (_, repoPath: string, remote?: string, branch?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (remote && branch) {
+        await git.pull(remote, branch)
+      } else {
+        await git.pull()
+      }
+      return true
+    } catch (e: any) {
+      return e.message || 'Pull failed'
+    }
+  })
+
+  // Push
+  ipcMain.handle('git:push', async (_, repoPath: string, remote?: string, branch?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (remote && branch) {
+        await git.push(remote, branch)
+      } else {
+        await git.push()
+      }
+      return true
+    } catch (e: any) {
+      return e.message || 'Push failed'
+    }
+  })
+
+  // Fetch
+  ipcMain.handle('git:fetch', async (_, repoPath: string, remote?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (remote) {
+        await git.fetch(remote)
+      } else {
+        await git.fetch()
+      }
+      return true
+    } catch (e: any) {
+      return e.message || 'Fetch failed'
+    }
+  })
+
+  // Get remotes
+  ipcMain.handle('git:getRemotes', async (_, repoPath: string) => {
+    try {
+      const remotes = await getGit(repoPath).getRemotes(true)
+      return remotes.map((r) => ({
+        name: r.name,
+        refs: r.refs
+      }))
+    } catch {
+      return []
+    }
+  })
+
+  // Add remote
+  ipcMain.handle('git:addRemote', async (_, repoPath: string, name: string, url: string) => {
+    try {
+      await getGit(repoPath).addRemote(name, url)
+      return true
+    } catch (e: any) {
+      return e.message || 'Add remote failed'
+    }
+  })
+
+  // Remove remote
+  ipcMain.handle('git:removeRemote', async (_, repoPath: string, name: string) => {
+    try {
+      await getGit(repoPath).removeRemote(name)
+      return true
+    } catch (e: any) {
+      return e.message || 'Remove remote failed'
+    }
+  })
+
+  // Diff - get unstaged changes
+  ipcMain.handle('git:diff', async (_, repoPath: string, filePath?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (filePath) {
+        return await git.diff(['--', filePath])
+      }
+      return await git.diff()
+    } catch {
+      return ''
+    }
+  })
+
+  // Diff staged
+  ipcMain.handle('git:diffStaged', async (_, repoPath: string, filePath?: string) => {
+    try {
+      const git = getGit(repoPath)
+      if (filePath) {
+        return await git.diff(['--cached', '--', filePath])
+      }
+      return await git.diff(['--cached'])
+    } catch {
+      return ''
     }
   })
 }

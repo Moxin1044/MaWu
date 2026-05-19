@@ -48,11 +48,23 @@ declare global {
         clone: (repoUrl: string, localPath: string) => Promise<boolean | string>
         status: (repoPath: string) => Promise<GitStatus | null>
         add: (repoPath: string, filePath?: string) => Promise<boolean>
+        reset: (repoPath: string, filePath?: string) => Promise<boolean>
         commit: (repoPath: string, message: string) => Promise<boolean>
         log: (repoPath: string, maxCount?: number) => Promise<GitLogEntry[]>
         branches: (repoPath: string) => Promise<GitBranches | null>
         checkout: (repoPath: string, branch: string) => Promise<boolean>
+        createBranch: (repoPath: string, branchName: string) => Promise<boolean>
+        deleteBranch: (repoPath: string, branchName: string) => Promise<boolean>
+        renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<boolean>
         isRepo: (repoPath: string) => Promise<boolean>
+        pull: (repoPath: string, remote?: string, branch?: string) => Promise<boolean | string>
+        push: (repoPath: string, remote?: string, branch?: string) => Promise<boolean | string>
+        fetch: (repoPath: string, remote?: string) => Promise<boolean | string>
+        getRemotes: (repoPath: string) => Promise<GitRemote[]>
+        addRemote: (repoPath: string, name: string, url: string) => Promise<boolean | string>
+        removeRemote: (repoPath: string, name: string) => Promise<boolean | string>
+        diff: (repoPath: string, filePath?: string) => Promise<string>
+        diffStaged: (repoPath: string, filePath?: string) => Promise<string>
       }
     }
   }
@@ -96,6 +108,11 @@ interface GitLogEntry {
 interface GitBranches {
   current: string
   all: string[]
+}
+
+interface GitRemote {
+  name: string
+  refs: { fetch: string; push: string }
 }
 
 export {}
