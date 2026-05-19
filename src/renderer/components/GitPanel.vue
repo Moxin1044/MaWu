@@ -52,12 +52,7 @@
             <t-button size="small" variant="text" @click="startCreateBranch" theme="primary">新建</t-button>
           </div>
           <div class="branch-list">
-            <div
-              v-for="br in branchList"
-              :key="br"
-              class="branch-item"
-              :class="{ current: br === gitStatus?.current }"
-            >
+            <div v-for="br in branchList" :key="br" class="branch-item" :class="{ current: br === gitStatus?.current }">
               <span class="branch-item-name" @click="checkoutBranch(br)">
                 <span v-if="br === gitStatus?.current" class="branch-dot"></span>
                 {{ br }}
@@ -68,13 +63,11 @@
               </div>
             </div>
           </div>
-          <!-- Create branch inline -->
           <div class="inline-input-row" v-if="creatingBranch">
             <t-input v-model="newBranchName" size="small" placeholder="分支名称" @keydown.enter="doCreateBranch" />
             <t-button size="small" @click="doCreateBranch" theme="primary">创建</t-button>
             <t-button size="small" variant="text" @click="creatingBranch = false">取消</t-button>
           </div>
-          <!-- Rename branch inline -->
           <div class="inline-input-row" v-if="renamingBranch">
             <t-input v-model="renameBranchNewName" size="small" :placeholder="`重命名 ${renamingBranch}`" @keydown.enter="doRenameBranch" />
             <t-button size="small" @click="doRenameBranch" theme="primary">确定</t-button>
@@ -106,40 +99,32 @@
           </div>
         </div>
 
-        <!-- Changes -->
-        <div v-if="gitStatus && gitStatus.files.length > 0">
-          <div class="section-label">更改 ({{ gitStatus.files.length }})</div>
-          <div
-            v-for="file in gitStatus.files"
-            :key="file.path"
-            class="change-item"
-          >
-            <span class="change-path">{{ file.path }}</span>
-            <span class="change-badge" :class="getChangeClass(file)">{{ getChangeLabel(file) }}</span>
-            <span class="stage-btn" @click="stageFile(file.path)" title="暂存">+</span>
-            <span class="stage-btn unstage" @click="unstageFile(file.path)" title="取消暂存">−</span>
-          </div>
-        </div>
-
         <!-- Commit area -->
         <div class="commit-area" v-if="gitStatus">
           <div class="commit-type-row">
             <select class="commit-type-select" v-model="commitType">
               <option v-for="ct in commitTypes" :key="ct.value" :value="ct.value">{{ ct.label }}</option>
             </select>
-            <t-input
-              v-model="commitScope"
-              placeholder="范围(可选)"
-              size="small"
-              class="scope-input"
-            />
+            <t-input v-model="commitScope" placeholder="范围(可选)" size="small" class="scope-input" />
           </div>
-          <t-input
-            v-model="commitDesc"
-            :placeholder="commitPlaceholder"
-            size="small"
-            @keydown.enter="doCommit"
-          />
+          <div class="commit-desc-row">
+            <t-input
+              v-model="commitDesc"
+              :placeholder="commitPlaceholder"
+              size="small"
+              @keydown.enter="doCommit"
+              class="commit-input"
+            />
+            <t-button
+              size="small"
+              variant="text"
+              @click="aiGenerateCommit"
+              :loading="aiGenerating"
+              title="AI 生成提交信息"
+              theme="primary"
+              class="ai-gen-btn"
+            >✨</t-button>
+          </div>
           <div class="commit-preview" v-if="commitPreview">
             <span class="preview-label">预览:</span>
             <code>{{ commitPreview }}</code>
@@ -147,6 +132,24 @@
           <t-button size="small" class="btn-gradient commit-btn" @click="doCommit" :disabled="!commitDesc.trim()">
             提交
           </t-button>
+        </div>
+
+        <!-- Changes + Diff (below commit area) -->
+        <div v-if="gitStatus && gitStatus.files.length > 0">
+          <div class="section-label">更改 ({{ gitStatus.files.length }})</div>
+          <div v-for="file in gitStatus.files" :key="file.path" class="change-group">
+            <div class="change-item" @click="toggleDiff(file.path)">
+              <span class="change-expand" :class="{ open: expandedDiffs.has(file.path) }">▸</span>
+              <span class="change-path">{{ file.path }}</span>
+              <span class="change-badge" :class="getChangeClass(file)">{{ getChangeLabel(file) }}</span>
+              <span class="stage-btn" @click.stop="stageFile(file.path)" title="暂存">+</span>
+              <span class="stage-btn unstage" @click.stop="unstageFile(file.path)" title="取消暂存">−</span>
+            </div>
+            <div class="diff-view" v-if="expandedDiffs.has(file.path)">
+              <div v-if="diffLoading.has(file.path)" class="diff-loading">加载中...</div>
+              <pre v-else class="diff-content">{{ fileDiffs[file.path] || '无差异' }}</pre>
+            </div>
+          </div>
         </div>
 
         <!-- Timeline history -->
@@ -176,11 +179,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useAiStore } from '@/stores/ai'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 const projectStore = useProjectStore()
+const aiStore = useAiStore()
 
 const gitStatus = ref<any>(null)
 const gitLog = ref<any[]>([])
@@ -199,10 +204,16 @@ const addingRemote = ref(false)
 const newRemoteName = ref('')
 const newRemoteUrl = ref('')
 
+// Diff
+const expandedDiffs = reactive(new Set<string>())
+const fileDiffs = reactive<Record<string, string>>({})
+const diffLoading = reactive(new Set<string>())
+
 // Commit
 const commitType = ref('feat')
 const commitScope = ref('')
 const commitDesc = ref('')
+const aiGenerating = ref(false)
 
 const commitTypes = [
   { value: 'feat', label: 'feat: 新功能' },
@@ -246,6 +257,37 @@ async function refreshStatus() {
     remotes.value = await window.api.git.getRemotes(path)
     const branches = await window.api.git.branches(path)
     branchList.value = branches?.all || []
+    // Clear stale diffs
+    for (const key of Object.keys(fileDiffs)) {
+      if (!gitStatus.value.files.some((f: any) => f.path === key)) {
+        delete fileDiffs[key]
+        expandedDiffs.delete(key)
+      }
+    }
+  }
+}
+
+async function toggleDiff(filePath: string) {
+  if (expandedDiffs.has(filePath)) {
+    expandedDiffs.delete(filePath)
+    return
+  }
+  expandedDiffs.add(filePath)
+  if (!fileDiffs[filePath]) {
+    await loadDiff(filePath)
+  }
+}
+
+async function loadDiff(filePath: string) {
+  if (!projectStore.currentProject) return
+  diffLoading.add(filePath)
+  try {
+    const diff = await window.api.git.diff(projectStore.currentProject.path, filePath)
+    fileDiffs[filePath] = diff || '无差异'
+  } catch {
+    fileDiffs[filePath] = '无法获取差异'
+  } finally {
+    diffLoading.delete(filePath)
   }
 }
 
@@ -278,6 +320,51 @@ async function doCommit() {
     MessagePlugin.success('提交成功')
   } else {
     MessagePlugin.error('提交失败')
+  }
+}
+
+async function aiGenerateCommit() {
+  if (!projectStore.currentProject || !aiStore.isConfigured) {
+    MessagePlugin.warning('请先配置 AI 模型')
+    return
+  }
+  if (!gitStatus.value?.files?.length) {
+    MessagePlugin.warning('没有文件变动')
+    return
+  }
+
+  aiGenerating.value = true
+  try {
+    // Collect all diffs
+    const diffs: string[] = []
+    for (const file of gitStatus.value.files) {
+      const diff = await window.api.git.diff(projectStore.currentProject.path, file.path)
+      if (diff) {
+        diffs.push(`--- ${file.path} ---\n${diff.slice(0, 2000)}`)
+      }
+    }
+
+    const prompt = `根据以下 Git diff 变动，生成一个符合 Conventional Commits 规范的提交信息。
+只输出提交信息本身，不要解释，不要代码块包裹。格式如: feat(scope): 描述 或 fix: 描述
+
+文件变动:
+${diffs.join('\n\n')}`
+
+    const result = await aiStore.sendToAi(prompt)
+    // Parse the result: try to extract type, scope, desc
+    const match = result.match(/^(\w+)(?:\(([^)]+)\))?:\s*(.+)$/m)
+    if (match) {
+      const type = commitTypes.find(ct => ct.value === match[1])
+      if (type) commitType.value = match[1]
+      if (match[2]) commitScope.value = match[2]
+      commitDesc.value = match[3].trim()
+    } else {
+      commitDesc.value = result.trim()
+    }
+  } catch (e: any) {
+    MessagePlugin.error('AI 生成失败: ' + e.message)
+  } finally {
+    aiGenerating.value = false
   }
 }
 
@@ -384,7 +471,6 @@ async function removeRemote(name: string) {
   }
 }
 
-// Parse conventional commit type from message
 function getCommitTypeTag(msg: string): string {
   const match = msg.match(/^(\w+)(\(.+\))?:/)
   return match ? match[1] : 'other'
@@ -397,16 +483,9 @@ function getCommitPureMsg(msg: string): string {
 function getCommitTypeClass(msg: string): string {
   const type = getCommitTypeTag(msg)
   const classMap: Record<string, string> = {
-    feat: 'type-feat',
-    fix: 'type-fix',
-    docs: 'type-docs',
-    style: 'type-style',
-    refactor: 'type-refactor',
-    perf: 'type-perf',
-    test: 'type-test',
-    chore: 'type-chore',
-    ci: 'type-ci',
-    revert: 'type-revert'
+    feat: 'type-feat', fix: 'type-fix', docs: 'type-docs', style: 'type-style',
+    refactor: 'type-refactor', perf: 'type-perf', test: 'type-test', chore: 'type-chore',
+    ci: 'type-ci', revert: 'type-revert'
   }
   return classMap[type] || 'type-other'
 }
@@ -464,403 +543,134 @@ function getChangeClass(file: any): string {
   color: var(--mawu-text-secondary);
 }
 
-.panel-actions {
-  display: flex;
-  gap: 4px;
-}
+.panel-actions { display: flex; gap: 4px; }
 
 .action-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--mawu-text-muted);
-  transition: all 0.15s;
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer;
+  color: var(--mawu-text-muted); transition: all 0.15s;
 }
+.action-btn:hover { color: var(--mawu-text-primary); background: var(--mawu-bg-hover); }
 
-.action-btn:hover {
-  color: var(--mawu-text-primary);
-  background: var(--mawu-bg-hover);
-}
+.panel-body { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 
-.panel-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 8px 8px;
-}
-
-.empty-state {
-  text-align: center;
-  padding: 24px 0;
-  color: var(--mawu-text-muted);
-  font-size: 13px;
-}
-
-.empty-state p {
-  margin-bottom: 12px;
-}
+.empty-state { text-align: center; padding: 24px 0; color: var(--mawu-text-muted); font-size: 13px; }
+.empty-state p { margin-bottom: 12px; }
 
 /* Branch info */
-.branch-info {
-  padding: 8px;
-  margin-bottom: 4px;
-  background: var(--mawu-bg-tertiary);
-  border-radius: 6px;
-}
-
-.branch-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--mawu-text-primary);
-  font-weight: 500;
-}
-
-.branch-current {
-  cursor: pointer;
-}
-
-.branch-current:hover {
-  color: var(--mawu-accent);
-}
-
-.sync-info {
-  font-size: 11px;
-  margin-left: auto;
-  display: flex;
-  gap: 4px;
-}
-
+.branch-info { padding: 8px; margin-bottom: 4px; background: var(--mawu-bg-tertiary); border-radius: 6px; }
+.branch-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--mawu-text-primary); font-weight: 500; }
+.branch-current { cursor: pointer; }
+.branch-current:hover { color: var(--mawu-accent); }
+.sync-info { font-size: 11px; margin-left: auto; display: flex; gap: 4px; }
 .sync-info .ahead { color: var(--mawu-success); }
 .sync-info .behind { color: var(--mawu-warning); }
-
-.branch-toggle {
-  cursor: pointer;
-  font-size: 10px;
-  color: var(--mawu-text-muted);
-  transition: transform 0.2s;
-}
-
-.branch-toggle.open {
-  transform: rotate(180deg);
-}
+.branch-toggle { cursor: pointer; font-size: 10px; color: var(--mawu-text-muted); transition: transform 0.2s; }
+.branch-toggle.open { transform: rotate(180deg); }
 
 /* Branch manager */
-.branch-manager {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--mawu-border);
-}
+.branch-manager { padding: 6px 0; border-bottom: 1px solid var(--mawu-border); }
+.sub-section-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; font-size: 11px; font-weight: 600; color: var(--mawu-text-secondary); cursor: pointer; }
+.sub-section-header .collapse-icon { font-size: 10px; transition: transform 0.2s; }
+.sub-section-header .collapse-icon.open { transform: rotate(180deg); }
+.count-badge { background: var(--mawu-bg-hover); padding: 0 5px; border-radius: 8px; font-size: 10px; margin-left: 4px; }
 
-.sub-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--mawu-text-secondary);
-  cursor: pointer;
-}
+.branch-list { padding: 0 4px; }
+.branch-item { display: flex; align-items: center; justify-content: space-between; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+.branch-item:hover { background: var(--mawu-bg-hover); }
+.branch-item.current { color: var(--mawu-accent); }
+.branch-item-name { cursor: pointer; display: flex; align-items: center; gap: 6px; flex: 1; }
+.branch-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mawu-accent); flex-shrink: 0; }
+.branch-item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.branch-item:hover .branch-item-actions { opacity: 1; }
 
-.sub-section-header .collapse-icon {
-  font-size: 10px;
-  transition: transform 0.2s;
-}
+.mini-btn { font-size: 11px; cursor: pointer; padding: 0 4px; color: var(--mawu-text-muted); border-radius: 3px; }
+.mini-btn:hover { color: var(--mawu-text-primary); background: var(--mawu-bg-hover); }
+.mini-btn.danger:hover { color: var(--mawu-error); }
 
-.sub-section-header .collapse-icon.open {
-  transform: rotate(180deg);
-}
-
-.count-badge {
-  background: var(--mawu-bg-hover);
-  padding: 0 5px;
-  border-radius: 8px;
-  font-size: 10px;
-  margin-left: 4px;
-}
-
-.branch-list {
-  padding: 0 4px;
-}
-
-.branch-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.branch-item:hover {
-  background: var(--mawu-bg-hover);
-}
-
-.branch-item.current {
-  color: var(--mawu-accent);
-}
-
-.branch-item-name {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-}
-
-.branch-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mawu-accent);
-  flex-shrink: 0;
-}
-
-.branch-item-actions {
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.branch-item:hover .branch-item-actions {
-  opacity: 1;
-}
-
-.mini-btn {
-  font-size: 11px;
-  cursor: pointer;
-  padding: 0 4px;
-  color: var(--mawu-text-muted);
-  border-radius: 3px;
-}
-
-.mini-btn:hover {
-  color: var(--mawu-text-primary);
-  background: var(--mawu-bg-hover);
-}
-
-.mini-btn.danger:hover {
-  color: var(--mawu-error);
-}
-
-.inline-input-row {
-  display: flex;
-  gap: 4px;
-  padding: 4px 8px;
-  align-items: center;
-}
-
-.inline-input-row .t-input {
-  flex: 1;
-  min-width: 0;
-}
+.inline-input-row { display: flex; gap: 4px; padding: 4px 8px; align-items: center; }
+.inline-input-row .t-input { flex: 1; min-width: 0; }
 
 /* Remote section */
-.remote-section {
-  border-bottom: 1px solid var(--mawu-border);
-}
-
-.remote-manager {
-  padding: 4px 8px 8px;
-}
-
-.remote-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.remote-item:hover {
-  background: var(--mawu-bg-hover);
-}
-
-.remote-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-}
-
-.remote-name {
-  font-weight: 600;
-  color: var(--mawu-text-primary);
-  font-size: 12px;
-}
-
-.remote-url {
-  color: var(--mawu-text-muted);
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.remote-section { border-bottom: 1px solid var(--mawu-border); }
+.remote-manager { padding: 4px 8px 8px; }
+.remote-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.remote-item:hover { background: var(--mawu-bg-hover); }
+.remote-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.remote-name { font-weight: 600; color: var(--mawu-text-primary); font-size: 12px; }
+.remote-url { color: var(--mawu-text-muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Changes */
-.section-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--mawu-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 8px 4px 4px;
-}
+.section-label { font-size: 11px; font-weight: 600; color: var(--mawu-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 4px 4px; }
 
-.change-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-}
+.change-group { border-radius: 4px; }
+.change-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+.change-item:hover { background: var(--mawu-bg-hover); }
 
-.change-item:hover {
-  background: var(--mawu-bg-hover);
-}
+.change-expand { font-size: 9px; color: var(--mawu-text-muted); transition: transform 0.15s; flex-shrink: 0; width: 10px; text-align: center; }
+.change-expand.open { transform: rotate(90deg); }
 
-.change-path {
-  flex: 1;
-  color: var(--mawu-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.change-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
+.change-path { flex: 1; color: var(--mawu-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.change-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
 .change-badge.modified { color: var(--mawu-warning); background: rgba(255, 170, 0, 0.1); }
 .change-badge.added { color: var(--mawu-success); background: rgba(0, 204, 136, 0.1); }
 .change-badge.deleted { color: var(--mawu-error); background: rgba(255, 68, 102, 0.1); }
 .change-badge.untracked { color: var(--mawu-text-muted); background: var(--mawu-bg-hover); }
 
-.stage-btn {
-  font-size: 14px;
-  cursor: pointer;
-  color: var(--mawu-text-muted);
-  opacity: 0;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
-  width: 18px;
-  text-align: center;
-}
+.stage-btn { font-size: 14px; cursor: pointer; color: var(--mawu-text-muted); opacity: 0; transition: opacity 0.15s; flex-shrink: 0; width: 16px; text-align: center; }
+.change-item:hover .stage-btn { opacity: 0.7; }
+.stage-btn:hover { opacity: 1 !important; color: var(--mawu-accent); }
+.stage-btn.unstage:hover { color: var(--mawu-warning); }
 
-.change-item:hover .stage-btn {
-  opacity: 0.7;
+/* Diff view */
+.diff-section { margin-top: 8px; }
+.diff-group { margin-bottom: 4px; }
+.diff-file-header {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px; border-radius: 4px;
+  font-size: 12px; cursor: pointer;
+  background: var(--mawu-bg-tertiary);
 }
-
-.stage-btn:hover {
-  opacity: 1 !important;
-  color: var(--mawu-accent);
-}
-
-.stage-btn.unstage:hover {
-  color: var(--mawu-warning);
+.diff-file-header:hover { background: var(--mawu-bg-hover); }
+.diff-file-name { flex: 1; color: var(--mawu-text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diff-view { margin: 2px 0 4px; background: var(--mawu-bg-deep); border-radius: 4px; border: 1px solid var(--mawu-border); overflow: hidden; }
+.diff-loading { padding: 8px 12px; font-size: 11px; color: var(--mawu-text-muted); }
+.diff-content {
+  padding: 8px 12px; margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px; line-height: 1.5;
+  color: var(--mawu-text-secondary);
+  max-height: 200px; overflow: auto;
+  white-space: pre-wrap; word-break: break-all;
 }
 
 /* Commit area */
-.commit-area {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.commit-type-row {
-  display: flex;
-  gap: 6px;
-}
-
+.commit-area { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.commit-type-row { display: flex; gap: 6px; }
 .commit-type-select {
-  background: var(--mawu-bg-deep);
-  color: var(--mawu-text-primary);
-  border: 1px solid var(--mawu-border);
-  border-radius: 4px;
-  font-size: 12px;
-  padding: 2px 6px;
-  outline: none;
-  cursor: pointer;
-  font-family: inherit;
-  flex-shrink: 0;
-  width: 130px;
+  background: var(--mawu-bg-deep); color: var(--mawu-text-primary);
+  border: 1px solid var(--mawu-border); border-radius: 4px;
+  font-size: 12px; padding: 2px 6px; outline: none; cursor: pointer;
+  font-family: inherit; flex-shrink: 0; width: 130px;
 }
+.commit-type-select:focus { border-color: var(--mawu-accent); }
+.scope-input { flex: 1; }
 
-.commit-type-select:focus {
-  border-color: var(--mawu-accent);
-}
+.commit-desc-row { display: flex; gap: 4px; align-items: center; }
+.commit-input { flex: 1; }
+.ai-gen-btn { flex-shrink: 0; font-size: 14px !important; }
 
-.scope-input {
-  flex: 1;
-}
-
-.commit-preview {
-  font-size: 11px;
-  color: var(--mawu-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.commit-preview code {
-  color: var(--mawu-accent);
-  background: var(--mawu-bg-tertiary);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 11px;
-}
-
-.commit-btn {
-  align-self: flex-end;
-}
+.commit-preview { font-size: 11px; color: var(--mawu-text-muted); display: flex; align-items: center; gap: 4px; }
+.commit-preview code { color: var(--mawu-accent); background: var(--mawu-bg-tertiary); padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+.commit-btn { align-self: flex-end; }
 
 /* Timeline */
-.timeline-section {
-  margin-top: 12px;
-}
-
-.timeline {
-  position: relative;
-  padding-left: 16px;
-}
-
-.timeline-entry {
-  position: relative;
-  padding: 6px 0 6px 20px;
-}
-
-.timeline-line {
-  position: absolute;
-  left: 6px;
-  top: 18px;
-  bottom: -6px;
-  width: 1px;
-  background: var(--mawu-border);
-}
-
-.timeline-dot {
-  position: absolute;
-  left: 2px;
-  top: 10px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--mawu-text-muted);
-  border: 2px solid var(--mawu-bg-deep);
-}
+.timeline-section { margin-top: 12px; }
+.timeline { position: relative; padding-left: 16px; }
+.timeline-entry { position: relative; padding: 6px 0 6px 20px; }
+.timeline-line { position: absolute; left: 6px; top: 18px; bottom: -6px; width: 1px; background: var(--mawu-border); }
+.timeline-dot { position: absolute; left: 2px; top: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--mawu-text-muted); border: 2px solid var(--mawu-bg-deep); }
 
 .timeline-dot.type-feat { background: var(--mawu-accent); }
 .timeline-dot.type-fix { background: var(--mawu-error); }
@@ -873,30 +683,10 @@ function getChangeClass(file: any): string {
 .timeline-dot.type-ci { background: #569cd6; }
 .timeline-dot.type-revert { background: #f44747; }
 
-.timeline-content {
-  min-width: 0;
-}
+.timeline-content { min-width: 0; }
+.timeline-msg { font-size: 12px; color: var(--mawu-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 
-.timeline-msg {
-  font-size: 12px;
-  color: var(--mawu-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.commit-type-tag {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 0 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  text-transform: lowercase;
-}
-
+.commit-type-tag { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 3px; flex-shrink: 0; text-transform: lowercase; }
 .commit-type-tag.type-feat { color: var(--mawu-accent); background: rgba(0, 122, 204, 0.15); }
 .commit-type-tag.type-fix { color: var(--mawu-error); background: rgba(255, 68, 102, 0.12); }
 .commit-type-tag.type-docs { color: #5b9bd5; background: rgba(91, 155, 213, 0.12); }
@@ -909,22 +699,7 @@ function getChangeClass(file: any): string {
 .commit-type-tag.type-revert { color: #f44747; background: rgba(244, 71, 71, 0.12); }
 .commit-type-tag.type-other { color: var(--mawu-text-muted); background: var(--mawu-bg-hover); }
 
-.timeline-meta {
-  display: flex;
-  gap: 8px;
-  font-size: 10px;
-  color: var(--mawu-text-muted);
-  margin-top: 2px;
-}
-
-.timeline-hash {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-}
-
-.timeline-author {
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.timeline-meta { display: flex; gap: 8px; font-size: 10px; color: var(--mawu-text-muted); margin-top: 2px; }
+.timeline-hash { font-family: 'JetBrains Mono', 'Consolas', monospace; }
+.timeline-author { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

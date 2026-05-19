@@ -3,7 +3,7 @@
     <TitleBar />
     <div class="editor-body">
       <!-- Left Sidebar -->
-      <div class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <div class="sidebar" :class="{ collapsed: sidebarCollapsed }" :style="sidebarCollapsed ? {} : { width: sidebarWidth + 'px' }">
         <div class="sidebar-tabs">
           <div
             class="sidebar-tab"
@@ -38,6 +38,13 @@
             <path d="M15 18l-6-6 6-6"/>
           </svg>
         </div>
+
+        <!-- Resize handle -->
+        <div
+          v-if="!sidebarCollapsed"
+          class="sidebar-resize-handle"
+          @mousedown="startResizeSidebar"
+        ></div>
       </div>
 
       <!-- Main Content -->
@@ -142,6 +149,34 @@ const projectStore = useProjectStore()
 
 const sidebarCollapsed = ref(false)
 const activeSideTab = ref<'files' | 'git'>('files')
+const sidebarWidth = ref(260)
+const isResizingSidebar = ref(false)
+
+function startResizeSidebar(e: MouseEvent) {
+  e.preventDefault()
+  isResizingSidebar.value = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+
+  function onMouseMove(ev: MouseEvent) {
+    const delta = ev.clientX - startX
+    const newWidth = Math.min(600, Math.max(180, startWidth + delta))
+    sidebarWidth.value = newWidth
+  }
+
+  function onMouseUp() {
+    isResizingSidebar.value = false
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
 
 // Terminal
 const terminalOpen = ref(false)
@@ -359,9 +394,9 @@ function scrollTerminal() {
   display: flex;
   background: var(--mawu-bg-primary);
   border-right: 1px solid var(--mawu-border);
-  transition: width 0.2s;
   width: var(--mawu-sidebar-width);
   position: relative;
+  flex-shrink: 0;
 }
 
 .sidebar.collapsed {
@@ -428,6 +463,21 @@ function scrollTerminal() {
 
 .sidebar-toggle:hover {
   color: var(--mawu-accent);
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 20;
+}
+
+.sidebar-resize-handle:hover {
+  background: var(--mawu-accent);
+  opacity: 0.3;
 }
 
 .main-area {
