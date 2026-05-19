@@ -1,0 +1,117 @@
+:root {
+  --mawu-bg-deep: #0d0d1a;
+  --mawu-bg-primary: #13132b;
+  --mawu-bg-secondary: #1a1a2e;
+  --mawu-bg-tertiary: #222240;
+  --mawu-bg-hover: #2a2a4a;
+  --mawu-bg-active: #33335a;
+  --mawu-border: #2a2a4a;
+  --mawu-border-light: #3a3a5a;
+  --mawu-text-primary: #e0e0f0;
+  --mawu-text-secondary: #8888aa;
+  --mawu-text-muted: #5a5a7a;
+  --mawu-accent: #00d4ff;
+  --mawu-accent-secondary: #0099cc;
+  --mawu-accent-gradient: linear-gradient(135deg, #00d4ff, #0088ff);
+  --mawu-accent-gradient-hover: linear-gradient(135deg, #33ddff, #3399ff);
+  --mawu-success: #00cc88;
+  --mawu-warning: #ffaa00;
+  --mawu-error: #ff4466;
+  --mawu-sidebar-width: 260px;
+  --mawu-titlebar-height: 38px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Inter', 'SF Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--mawu-bg-deep);
+  color: var(--mawu-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--mawu-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mawu-border-light);
+}
+
+/* TDesign Dark Override */
+.t-design-default {
+  --td-bg-color-container: var(--mawu-bg-secondary);
+  --td-bg-color-container-hover: var(--mawu-bg-hover);
+  --td-bg-color-container-active: var(--mawu-bg-active);
+  --td-bg-color-container-select: var(--mawu-bg-tertiary);
+  --td-component-border: var(--mawu-border);
+  --td-text-color-primary: var(--mawu-text-primary);
+  --td-text-color-secondary: var(--mawu-text-secondary);
+  --td-text-color-disabled: var(--mawu-text-muted);
+  --td-brand-color: var(--mawu-accent);
+  --td-brand-color-hover: var(--mawu-accent-secondary);
+}
+
+/* Input overrides */
+.t-input, .t-textarea__inner, .t-select .t-input {
+  background-color: var(--mawu-bg-tertiary) !important;
+  border-color: var(--mawu-border) !important;
+  color: var(--mawu-text-primary) !important;
+}
+
+.t-input::placeholder, .t-textarea__inner::placeholder {
+  color: var(--mawu-text-muted) !important;
+}
+
+/* Button gradient */
+.btn-gradient {
+  background: var(--mawu-accent-gradient);
+  border: none;
+  color: #fff;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-gradient:hover {
+  background: var(--mawu-accent-gradient-hover);
+  box-shadow: 0 4px 16px rgba(0, 212, 255, 0.3);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--mawu-border);
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 212, 255, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.4); }
+}
