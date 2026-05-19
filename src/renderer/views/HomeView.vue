@@ -17,16 +17,7 @@
       <div class="home-header">
         <div class="logo-wrapper">
           <div class="logo-icon">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <rect x="4" y="4" width="40" height="40" rx="8" stroke="url(#grad)" stroke-width="2.5" fill="none"/>
-              <path d="M16 24L22 30L32 18" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-              <defs>
-                <linearGradient id="grad" x1="4" y1="4" x2="44" y2="44">
-                  <stop stop-color="#00d4ff"/>
-                  <stop offset="1" stop-color="#0088ff"/>
-                </linearGradient>
-              </defs>
-            </svg>
+            <img src="/icon.png" width="48" height="48" alt="码悟" />
           </div>
           <h1 class="app-title">码悟</h1>
         </div>

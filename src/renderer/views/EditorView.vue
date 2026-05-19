@@ -64,10 +64,7 @@
           <CodeEditor v-if="editorStore.activeFile" />
           <div class="empty-editor" v-else>
             <div class="empty-content">
-              <svg width="64" height="64" viewBox="0 0 48 48" fill="none" opacity="0.15">
-                <rect x="4" y="4" width="40" height="40" rx="8" stroke="currentColor" stroke-width="2"/>
-                <path d="M16 24L22 30L32 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
+              <img src="/icon.png" width="64" height="64" alt="码悟" style="opacity: 0.15" />
               <p>选择文件开始编辑</p>
               <p class="hint">Ctrl+S 保存 | Ctrl+P 快速打开 | Ctrl+` 命令行</p>
             </div>

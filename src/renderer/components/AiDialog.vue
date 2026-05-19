@@ -63,13 +63,63 @@
     </div>
 
     <div class="dialog-input">
-      <t-textarea
-        v-model="inputText"
-        placeholder="输入消息，如「帮我优化这段代码」..."
-        :autosize="{ minRows: 1, maxRows: 4 }"
-        @keydown="handleKeyDown"
-      />
-      <div class="send-btn" :class="{ active: inputText.trim() }" @click="sendMessage">
+      <div class="input-wrapper">
+        <t-textarea
+          ref="textareaRef"
+          v-model="inputText"
+          placeholder="输入消息，如「帮我优化这段代码」..."
+          :autosize="{ minRows: 1, maxRows: 4 }"
+          @keydown="handleKeyDown"
+          @input="handleInput"
+        />
+        <!-- @ File Mention Popup -->
+        <div v-if="mention.visible" class="mention-popup">
+          <div class="mention-search">
+            <input
+              ref="mentionSearchRef"
+              v-model="mention.search"
+              placeholder="搜索文件..."
+              @keydown="handleMentionKeydown"
+              @keydown.down.prevent="mentionIndex = Math.min(mentionIndex + 1, filteredMentionFiles.length - 1)"
+              @keydown.up.prevent="mentionIndex = Math.max(mentionIndex - 1, 0)"
+              @keydown.enter.prevent="selectMentionFile"
+              @keydown.esc.prevent="closeMention"
+            />
+          </div>
+          <div class="mention-list">
+            <div
+              v-for="(file, idx) in filteredMentionFiles"
+              :key="file.path"
+              class="mention-item"
+              :class="{ active: idx === mentionIndex }"
+              @click="selectMentionFile()"
+              @mouseenter="mentionIndex = idx"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/>
+              </svg>
+              <span class="mention-name">{{ file.name }}</span>
+              <span class="mention-path">{{ file.relPath }}</span>
+            </div>
+            <div v-if="filteredMentionFiles.length === 0" class="mention-empty">未找到文件</div>
+          </div>
+        </div>
+        <!-- Mention Tags -->
+        <div v-if="mentionedFiles.length > 0" class="mention-tags">
+          <span
+            v-for="(f, idx) in mentionedFiles"
+            :key="f.path"
+            class="mention-tag"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/>
+            </svg>
+            {{ f.name }}
+            <span class="tag-remove" @click="removeMention(idx)">×</span>
+          </span>
+        </div>
+      </div>
+      <div class="send-btn" :class="{ active: inputText.trim() || mentionedFiles.length > 0 }" @click="sendMessage">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
         </svg>
@@ -79,18 +129,106 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, reactive } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import { useEditorStore } from '@/stores/editor'
+import { useProjectStore } from '@/stores/project'
 
 const aiStore = useAiStore()
 const editorStore = useEditorStore()
+const projectStore = useProjectStore()
 
 const inputText = ref('')
 const isLoading = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
+const textareaRef = ref<any>(null)
+const mentionSearchRef = ref<HTMLInputElement | null>(null)
 
 const currentModelId = ref(aiStore.activeModelId)
+
+// Mention (@) file selection
+interface MentionFile {
+  path: string
+  name: string
+  relPath: string
+}
+
+const mentionedFiles = ref<MentionFile[]>([])
+const mentionIndex = ref(0)
+const mention = reactive({
+  visible: false,
+  search: '',
+  allFiles: [] as MentionFile[]
+})
+
+const filteredMentionFiles = computed(() => {
+  if (!mention.search) return mention.allFiles.slice(0, 30)
+  const q = mention.search.toLowerCase()
+  return mention.allFiles
+    .filter(f => f.name.toLowerCase().includes(q) || f.relPath.toLowerCase().includes(q))
+    .slice(0, 30)
+})
+
+async function openMention() {
+  mention.visible = true
+  mention.search = ''
+  mentionIndex.value = 0
+  if (mention.allFiles.length === 0 && projectStore.currentProject) {
+    const files = await window.api.fs.readdirRecursive(projectStore.currentProject.path)
+    mention.allFiles = files.map(f => ({
+      path: f.path,
+      name: f.relPath.split('/').pop() || f.relPath,
+      relPath: f.relPath
+    }))
+  }
+  await nextTick()
+  mentionSearchRef.value?.focus()
+}
+
+function closeMention() {
+  mention.visible = false
+  mention.search = ''
+  mentionIndex.value = 0
+  // Remove trailing @ from input
+  if (inputText.value.endsWith('@')) {
+    inputText.value = inputText.value.slice(0, -1)
+  }
+  textareaRef.value?.focus()
+}
+
+function selectMentionFile() {
+  const file = filteredMentionFiles.value[mentionIndex.value]
+  if (!file) return
+  // Avoid duplicates
+  if (!mentionedFiles.value.some(f => f.path === file.path)) {
+    mentionedFiles.value.push(file)
+  }
+  // Remove @ and search text from input
+  const atIdx = inputText.value.lastIndexOf('@')
+  if (atIdx >= 0) {
+    inputText.value = inputText.value.slice(0, atIdx)
+  }
+  mention.visible = false
+  mention.search = ''
+  mentionIndex.value = 0
+  textareaRef.value?.focus()
+}
+
+function removeMention(idx: number) {
+  mentionedFiles.value.splice(idx, 1)
+}
+
+function handleInput() {
+  if (inputText.value.endsWith('@')) {
+    openMention()
+  }
+}
+
+function handleMentionKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    closeMention()
+  }
+}
 
 const modelOptions = computed(() =>
   aiStore.models.map((m) => ({
@@ -120,20 +258,45 @@ function handleKeyDown(e: KeyboardEvent) {
 
 async function sendMessage() {
   const text = inputText.value.trim()
-  if (!text || isLoading.value) return
+  if ((!text && mentionedFiles.value.length === 0) || isLoading.value) return
 
-  aiStore.addChatMessage('user', text)
+  // Build display message
+  let displayText = text
+  if (mentionedFiles.value.length > 0) {
+    const fileNames = mentionedFiles.value.map(f => `@${f.name}`).join(' ')
+    displayText = fileNames + (text ? ' ' + text : '')
+  }
+
+  aiStore.addChatMessage('user', displayText)
   inputText.value = ''
   isLoading.value = true
 
   await nextTick()
   scrollToBottom()
 
-  // Include current file context if a file is open
-  let context: string | undefined
-  if (editorStore.activeFile) {
-    context = `当前正在编辑的文件是 ${editorStore.activeFile.name}，文件内容如下：\n\`\`\`\n${editorStore.activeFile.content.substring(0, 3000)}\n\`\`\`\n\n如果用户要求修改代码，请直接返回修改后的完整代码，用代码块包裹。`
+  // Build context from mentioned files and current file
+  let contextParts: string[] = []
+
+  // Add mentioned files content
+  for (const f of mentionedFiles.value) {
+    const content = await window.api.fs.readFile(f.path)
+    if (content) {
+      contextParts.push(`文件 ${f.relPath} 的内容如下：\n\`\`\`\n${content.substring(0, 5000)}\n\`\`\``)
+    }
   }
+
+  // Add current file context if no mentioned files
+  if (mentionedFiles.value.length === 0 && editorStore.activeFile) {
+    contextParts.push(`当前正在编辑的文件是 ${editorStore.activeFile.name}，文件内容如下：\n\`\`\`\n${editorStore.activeFile.content.substring(0, 3000)}\n\`\`\``)
+  }
+
+  if (contextParts.length > 0) {
+    contextParts.push('如果用户要求修改代码，请直接返回修改后的完整代码，用代码块包裹。')
+  }
+
+  const context = contextParts.length > 0 ? contextParts.join('\n\n') : undefined
+  const filesToSend = [...mentionedFiles.value]
+  mentionedFiles.value = []
 
   const response = await aiStore.sendToAi(text, context)
   aiStore.addChatMessage('assistant', response)
@@ -359,8 +522,130 @@ function formatTime(ts: number): string {
   flex-shrink: 0;
 }
 
-.dialog-input :deep(.t-textarea) {
+.input-wrapper {
   flex: 1;
+  position: relative;
+}
+
+.dialog-input :deep(.t-textarea) {
+  width: 100%;
+}
+
+.mention-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 0;
+}
+
+.mention-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--mawu-accent);
+  white-space: nowrap;
+}
+
+.tag-remove {
+  cursor: pointer;
+  opacity: 0.6;
+  font-size: 13px;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+.tag-remove:hover {
+  opacity: 1;
+}
+
+.mention-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.mention-search {
+  padding: 6px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.mention-search input {
+  width: 100%;
+  background: #12121e;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #e0e0f0;
+  outline: none;
+}
+
+.mention-search input:focus {
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+.mention-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #e0e0f0;
+  transition: background 0.1s;
+}
+
+.mention-item:hover,
+.mention-item.active {
+  background: #2a2a4a;
+}
+
+.mention-item svg {
+  flex-shrink: 0;
+  color: var(--mawu-accent);
+  opacity: 0.6;
+}
+
+.mention-name {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.mention-path {
+  color: #8080a0;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #8080a0;
 }
 
 .send-btn {

@@ -2,15 +2,7 @@
   <div class="title-bar">
     <div class="title-left">
       <div class="app-icon">
-        <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
-          <rect x="4" y="4" width="40" height="40" rx="8" stroke="url(#tgrad)" stroke-width="2.5" fill="none"/>
-          <path d="M16 24L22 30L32 18" stroke="url(#tgrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <defs>
-            <linearGradient id="tgrad" x1="4" y1="4" x2="44" y2="44">
-              <stop stop-color="#00d4ff"/><stop offset="1" stop-color="#0088ff"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img src="/icon.png" width="16" height="16" alt="码悟" />
       </div>
 
       <!-- 文件菜单 -->
@@ -38,15 +30,7 @@
           <div class="dropdown-menu about-menu">
             <div class="about-header">
               <div class="about-logo">
-                <svg width="24" height="24" viewBox="0 0 48 48" fill="none">
-                  <rect x="4" y="4" width="40" height="40" rx="8" stroke="url(#tgrad2)" stroke-width="2.5" fill="none"/>
-                  <path d="M16 24L22 30L32 18" stroke="url(#tgrad2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <defs>
-                    <linearGradient id="tgrad2" x1="4" y1="4" x2="44" y2="44">
-                      <stop stop-color="#00d4ff"/><stop offset="1" stop-color="#0088ff"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
+                <img src="/icon.png" width="24" height="24" alt="码悟" />
               </div>
               <div class="about-info">
                 <div class="about-name">码悟 MaWu</div>
