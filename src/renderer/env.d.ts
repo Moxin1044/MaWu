@@ -12,9 +12,22 @@ declare global {
 
       getHomeDir: () => Promise<string>
       getUserData: () => Promise<string>
-      executeCommand: (command: string) => Promise<string>
       openInExplorer: (filePath: string) => Promise<void>
-      openTerminal: (filePath: string) => Promise<void>
+
+      terminal: {
+        getShells: () => Promise<Array<{ id: string; label: string; path: string; args: string[] }>>
+        execute: (command: string, cwd?: string, shellId?: string) => Promise<string>
+        createSession: (sessionId: string, cwd?: string, shellId?: string) => Promise<boolean>
+        write: (sessionId: string, data: string) => void
+        killSession: (sessionId: string) => Promise<boolean>
+        openExternal: (filePath: string) => Promise<void>
+        onData: (callback: (sessionId: string, data: string, stream: string) => void) => void
+        onExit: (callback: (sessionId: string, code: number | null) => void) => void
+        onError: (callback: (sessionId: string, message: string) => void) => void
+        removeDataListener: () => void
+        removeExitListener: () => void
+        removeErrorListener: () => void
+      }
 
       fs: {
         readdir: (dirPath: string) => Promise<FileEntry[]>

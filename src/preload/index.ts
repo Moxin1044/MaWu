@@ -15,9 +15,31 @@ const api = {
   // App
   getHomeDir: () => ipcRenderer.invoke('app:getHomeDir'),
   getUserData: () => ipcRenderer.invoke('app:getUserData'),
-  executeCommand: (command: string) => ipcRenderer.invoke('app:executeCommand', command),
   openInExplorer: (filePath: string) => ipcRenderer.invoke('app:openInExplorer', filePath),
-  openTerminal: (filePath: string) => ipcRenderer.invoke('app:openTerminal', filePath),
+
+  // Terminal
+  terminal: {
+    getShells: () => ipcRenderer.invoke('terminal:getShells'),
+    execute: (command: string, cwd?: string, shellId?: string) =>
+      ipcRenderer.invoke('terminal:execute', command, cwd, shellId),
+    createSession: (sessionId: string, cwd?: string, shellId?: string) =>
+      ipcRenderer.invoke('terminal:createSession', sessionId, cwd, shellId),
+    write: (sessionId: string, data: string) =>
+      ipcRenderer.send('terminal:write', sessionId, data),
+    killSession: (sessionId: string) =>
+      ipcRenderer.invoke('terminal:killSession', sessionId),
+    openExternal: (filePath: string) =>
+      ipcRenderer.invoke('terminal:openExternal', filePath),
+    onData: (callback: (sessionId: string, data: string, stream: string) => void) =>
+      ipcRenderer.on('terminal:data', (_, sessionId, data, stream) => callback(sessionId, data, stream)),
+    onExit: (callback: (sessionId: string, code: number | null) => void) =>
+      ipcRenderer.on('terminal:exit', (_, sessionId, code) => callback(sessionId, code)),
+    onError: (callback: (sessionId: string, message: string) => void) =>
+      ipcRenderer.on('terminal:error', (_, sessionId, message) => callback(sessionId, message)),
+    removeDataListener: () => ipcRenderer.removeAllListeners('terminal:data'),
+    removeExitListener: () => ipcRenderer.removeAllListeners('terminal:exit'),
+    removeErrorListener: () => ipcRenderer.removeAllListeners('terminal:error')
+  },
 
   // File system
   fs: {

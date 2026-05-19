@@ -315,7 +315,7 @@ function openTerminalHere() {
   const targetPath = contextMenu.item.isDirectory
     ? contextMenu.item.path
     : contextMenu.item.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
-  window.api.openTerminal(targetPath)
+  window.api.terminal.openExternal(targetPath)
   contextMenu.visible = false
 }
 
@@ -563,7 +563,7 @@ ${content}
   const response = await aiStore.sendToAi(prompt)
 
   if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
-    const reportName = `security-audit-${contextMenu.item.name}.md`
+    const reportName = `CheckSecurity.md`
     const project = projectStore.currentProject
     const reportPath = project ? project.path + '/' + reportName : contextMenu.item.path.replace(/[^/\\]+$/, reportName)
     const success = await window.api.fs.writeFile(reportPath, response)
@@ -638,8 +638,8 @@ ${fileInfos}`
   }
 
   const fullReport = allReports.join('\n\n---\n\n')
+  const reportName = `CheckSecurity.md`
   const project = projectStore.currentProject
-  const reportName = `security-audit-${contextMenu.item.name}.md`
   const reportPath = project ? project.path + '/' + reportName : contextMenu.item.path + '/' + reportName
   const success = await window.api.fs.writeFile(reportPath, fullReport)
 

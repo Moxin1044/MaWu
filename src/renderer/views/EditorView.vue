@@ -74,19 +74,33 @@
         <!-- Bottom Terminal -->
         <div class="terminal-panel" :class="{ open: terminalOpen }">
           <div class="terminal-header">
-            <span class="terminal-title">命令行</span>
+            <div class="terminal-tabs-area">
+              <div class="terminal-tab" v-for="tab in termStore.tabs" :key="tab.id"
+                :class="{ active: tab.id === termStore.activeTabId }"
+                @click="switchTerminalTab(tab.id)">
+                <span class="term-tab-name">{{ tab.name }}</span>
+                <span class="term-tab-close" @click.stop="closeTerminalTab(tab.id)">×</span>
+              </div>
+              <span class="terminal-action term-add-btn" @click="addTerminalTab" title="新建终端">+</span>
+            </div>
             <div class="terminal-actions">
-              <span class="terminal-action" @click="clearTerminal" title="清除">清除</span>
+              <select class="shell-select" v-model="selectedShellId" @change="onShellChange" title="选择 Shell">
+                <option v-for="sh in termStore.availableShells" :key="sh.id" :value="sh.id">{{ sh.label }}</option>
+              </select>
+              <span class="terminal-action" @click="clearActiveTerminal" title="清除">清除</span>
               <span class="terminal-action" @click="terminalOpen = false" title="关闭">✕</span>
             </div>
           </div>
-          <div class="terminal-body" ref="terminalBody">
-            <div v-for="(line, i) in terminalLines" :key="i" class="terminal-line" :class="line.type">
+          <div class="terminal-body" ref="terminalBody" v-if="termStore.activeTab">
+            <div v-for="(line, i) in termStore.activeTab.lines" :key="i" class="terminal-line" :class="line.type">
               <span class="terminal-prompt" v-if="line.type === 'input'">❯&nbsp;</span>
               <span class="terminal-text">{{ line.text }}</span>
             </div>
           </div>
-          <div class="terminal-input-row">
+          <div class="terminal-body terminal-empty" v-else>
+            <span class="terminal-empty-text">点击 + 新建终端会话</span>
+          </div>
+          <div class="terminal-input-row" v-if="termStore.activeTab">
             <span class="terminal-prompt-symbol">❯</span>
             <input
               class="terminal-input"
@@ -94,7 +108,7 @@
               @keydown.enter="executeTerminalCommand"
               @keydown.up.prevent="historyUp"
               @keydown.down.prevent="historyDown"
-              placeholder="输入命令..."
+              :placeholder="`输入命令 (${termStore.activeTab.shellLabel})...`"
               ref="terminalInputEl"
             />
           </div>
@@ -113,6 +127,8 @@
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useEditorStore } from '@/stores/editor'
 import { useAiStore } from '@/stores/ai'
+import { useTerminalStore } from '@/stores/terminal'
+import { useProjectStore } from '@/stores/project'
 import TitleBar from '@/components/TitleBar.vue'
 import FileTree from '@/components/FileTree.vue'
 import GitPanel from '@/components/GitPanel.vue'
@@ -121,6 +137,8 @@ import AiDialog from '@/components/AiDialog.vue'
 
 const editorStore = useEditorStore()
 const aiStore = useAiStore()
+const termStore = useTerminalStore()
+const projectStore = useProjectStore()
 
 const sidebarCollapsed = ref(false)
 const activeSideTab = ref<'files' | 'git'>('files')
@@ -130,9 +148,7 @@ const terminalOpen = ref(false)
 const terminalInput = ref('')
 const terminalInputEl = ref<HTMLInputElement | null>(null)
 const terminalBody = ref<HTMLElement | null>(null)
-const terminalLines = ref<Array<{ type: 'input' | 'output' | 'error'; text: string }>>([])
-const commandHistory = ref<string[]>([])
-const historyIndex = ref(-1)
+const selectedShellId = ref('')
 
 function handleGlobalKeydown(e: KeyboardEvent) {
   // Ctrl+` toggle terminal
@@ -140,23 +156,62 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     e.preventDefault()
     terminalOpen.value = !terminalOpen.value
     if (terminalOpen.value) {
-      nextTick(() => {
-        terminalInputEl.value?.focus()
-      })
+      ensureActiveTab()
+      nextTick(() => terminalInputEl.value?.focus())
     }
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  await termStore.loadShells()
+  selectedShellId.value = termStore.defaultShellId
+
+  // Listen for terminal data from main process
+  window.api.terminal.onData((sessionId: string, data: string, stream: string) => {
+    const tab = termStore.tabs.find(t => t.id === sessionId)
+    if (tab) {
+      const type = stream === 'stderr' ? 'error' : 'output'
+      // Split multi-line output into separate lines
+      const lines = data.split('\n')
+      for (const line of lines) {
+        if (line) {
+          tab.lines.push({ type, text: line })
+        }
+      }
+      if (termStore.activeTabId === sessionId) {
+        scrollTerminal()
+      }
+    }
+  })
+
+  window.api.terminal.onExit((sessionId: string) => {
+    const tab = termStore.tabs.find(t => t.id === sessionId)
+    if (tab) {
+      tab.alive = false
+      tab.lines.push({ type: 'error', text: '[进程已退出]' })
+    }
+  })
+
+  window.api.terminal.onError((sessionId: string, message: string) => {
+    const tab = termStore.tabs.find(t => t.id === sessionId)
+    if (tab) {
+      tab.alive = false
+      tab.lines.push({ type: 'error', text: `[错误] ${message}` })
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.api.terminal.removeDataListener()
+  window.api.terminal.removeExitListener()
+  window.api.terminal.removeErrorListener()
 })
 
 watch(terminalOpen, (val) => {
   if (val) {
+    ensureActiveTab()
     nextTick(() => {
       terminalInputEl.value?.focus()
       scrollTerminal()
@@ -164,68 +219,116 @@ watch(terminalOpen, (val) => {
   }
 })
 
+function ensureActiveTab() {
+  if (!termStore.activeTab) {
+    addTerminalTab()
+  }
+}
+
+function addTerminalTab() {
+  const shellId = selectedShellId.value || termStore.defaultShellId
+  const cwd = projectStore.currentProject?.path || ''
+  const tab = termStore.createTab(shellId, cwd)
+  // Create persistent session
+  window.api.terminal.createSession(tab.id, cwd || undefined, shellId)
+  tab.alive = true
+  nextTick(() => {
+    terminalInputEl.value?.focus()
+    scrollTerminal()
+  })
+}
+
+function closeTerminalTab(tabId: string) {
+  termStore.closeTab(tabId)
+}
+
+function switchTerminalTab(tabId: string) {
+  termStore.switchTab(tabId)
+  nextTick(() => {
+    terminalInputEl.value?.focus()
+    scrollTerminal()
+  })
+}
+
+function onShellChange() {
+  termStore.setDefaultShell(selectedShellId.value)
+}
+
 async function executeTerminalCommand() {
   const cmd = terminalInput.value.trim()
-  if (!cmd) return
+  if (!cmd || !termStore.activeTab) return
 
-  terminalLines.value.push({ type: 'input', text: cmd })
-  commandHistory.value.push(cmd)
-  historyIndex.value = commandHistory.value.length
+  const tab = termStore.activeTab
+  tab.lines.push({ type: 'input', text: cmd })
+  tab.commandHistory.push(cmd)
+  tab.historyIndex = tab.commandHistory.length
   terminalInput.value = ''
 
-  // Process command
+  // Process built-in commands
   try {
     if (cmd === 'clear') {
-      terminalLines.value = []
+      tab.lines = []
       return
     }
     if (cmd === 'help') {
-      terminalLines.value.push({ type: 'output', text: '可用命令: clear, help, ai <问题>, cd <路径>, ls, pwd' })
+      tab.lines.push({ type: 'output', text: '可用命令: clear, help, ai <问题>' })
       return
     }
     if (cmd.startsWith('ai ')) {
       const question = cmd.substring(3)
-      terminalLines.value.push({ type: 'output', text: '正在向 AI 提问...' })
+      tab.lines.push({ type: 'output', text: '正在向 AI 提问...' })
       scrollTerminal()
       const response = await aiStore.sendToAi(question)
-      terminalLines.value.push({ type: 'output', text: response })
+      tab.lines.push({ type: 'output', text: response })
       scrollTerminal()
       return
     }
 
-    // Execute shell command via IPC
-    const result = await window.api.executeCommand?.(cmd)
-    if (result) {
-      terminalLines.value.push({ type: 'output', text: typeof result === 'string' ? result : JSON.stringify(result) })
+    // If session is alive, write to stdin; otherwise execute one-shot
+    if (tab.alive) {
+      window.api.terminal.write(tab.id, cmd + '\n')
     } else {
-      terminalLines.value.push({ type: 'output', text: `命令已执行: ${cmd}` })
+      // One-shot execution for dead sessions
+      const cwd = tab.cwd || projectStore.currentProject?.path || undefined
+      const result = await window.api.terminal.execute(cmd, cwd, tab.shellId)
+      if (result) {
+        tab.lines.push({ type: 'output', text: typeof result === 'string' ? result : JSON.stringify(result) })
+      } else {
+        tab.lines.push({ type: 'output', text: `命令已执行: ${cmd}` })
+      }
+      scrollTerminal()
     }
   } catch (e: any) {
-    terminalLines.value.push({ type: 'error', text: e.message || '执行失败' })
+    tab.lines.push({ type: 'error', text: e.message || '执行失败' })
+    scrollTerminal()
   }
-
-  scrollTerminal()
 }
 
 function historyUp() {
-  if (historyIndex.value > 0) {
-    historyIndex.value--
-    terminalInput.value = commandHistory.value[historyIndex.value]
+  const tab = termStore.activeTab
+  if (!tab) return
+  if (tab.historyIndex > 0) {
+    tab.historyIndex--
+    terminalInput.value = tab.commandHistory[tab.historyIndex]
   }
 }
 
 function historyDown() {
-  if (historyIndex.value < commandHistory.value.length - 1) {
-    historyIndex.value++
-    terminalInput.value = commandHistory.value[historyIndex.value]
+  const tab = termStore.activeTab
+  if (!tab) return
+  if (tab.historyIndex < tab.commandHistory.length - 1) {
+    tab.historyIndex++
+    terminalInput.value = tab.commandHistory[tab.historyIndex]
   } else {
-    historyIndex.value = commandHistory.value.length
+    tab.historyIndex = tab.commandHistory.length
     terminalInput.value = ''
   }
 }
 
-function clearTerminal() {
-  terminalLines.value = []
+function clearActiveTerminal() {
+  if (termStore.activeTab) {
+    termStore.activeTab.lines = []
+  }
 }
 
 function scrollTerminal() {
@@ -451,30 +554,109 @@ function scrollTerminal() {
 }
 
 .terminal-panel.open {
-  height: 220px;
+  height: 240px;
 }
 
 .terminal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 0 8px;
   background: var(--mawu-bg-primary);
   border-bottom: 1px solid var(--mawu-border);
   flex-shrink: 0;
+  height: 32px;
 }
 
-.terminal-title {
+.terminal-tabs-area {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
   font-size: 11px;
-  font-weight: 600;
+  color: var(--mawu-text-muted);
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  border-bottom: 2px solid transparent;
+}
+
+.terminal-tab:hover {
   color: var(--mawu-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  background: var(--mawu-bg-hover);
+}
+
+.terminal-tab.active {
+  color: var(--mawu-text-primary);
+  background: var(--mawu-bg-deep);
+  border-bottom-color: var(--mawu-accent);
+}
+
+.term-tab-name {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.term-tab-close {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: 2px;
+}
+
+.terminal-tab:hover .term-tab-close {
+  opacity: 0.6;
+}
+
+.term-tab-close:hover {
+  opacity: 1 !important;
+  color: var(--mawu-error);
+}
+
+.term-add-btn {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 0 6px;
+  line-height: 1;
 }
 
 .terminal-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.shell-select {
+  background: var(--mawu-bg-deep);
+  color: var(--mawu-text-secondary);
+  border: 1px solid var(--mawu-border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 4px;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.shell-select:hover {
+  border-color: var(--mawu-accent);
+}
+
+.shell-select:focus {
+  border-color: var(--mawu-accent);
 }
 
 .terminal-action {
@@ -495,6 +677,18 @@ function scrollTerminal() {
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.terminal-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-empty-text {
+  color: var(--mawu-text-muted);
+  opacity: 0.5;
+  font-size: 12px;
 }
 
 .terminal-line {

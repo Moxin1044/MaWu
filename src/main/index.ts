@@ -3,9 +3,15 @@ import { join, basename } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as fs from 'fs-extra'
 import * as path from 'path'
-import { exec } from 'child_process'
 import { registerFileIpc } from './ipc/file'
 import { registerGitIpc } from './ipc/git'
+import { registerTerminalIpc } from './ipc/terminal'
+
+// Global reference for terminal IPC to access webContents
+declare global {
+  // eslint-disable-next-line no-var
+  var __mawu_mainWindow: BrowserWindow | null
+}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -90,39 +96,19 @@ app.whenReady().then(() => {
     return app.getPath('userData')
   })
 
-  // Execute terminal command
-  ipcMain.handle('app:executeCommand', async (_, command: string) => {
-    return new Promise((resolve) => {
-      exec(command, { cwd: app.getPath('home'), timeout: 10000 }, (error: any, stdout: string, stderr: string) => {
-        if (error) {
-          resolve(stderr || error.message)
-        } else {
-          resolve(stdout || '(无输出)')
-        }
-      })
-    })
-  })
-
   // Open in file explorer
   ipcMain.handle('app:openInExplorer', async (_, filePath: string) => {
     shell.openPath(filePath)
   })
 
-  // Open terminal at path
-  ipcMain.handle('app:openTerminal', async (_, filePath: string) => {
-    if (process.platform === 'win32') {
-      exec(`start cmd /K "cd /d ${filePath}"`)
-    } else if (process.platform === 'darwin') {
-      exec(`open -a Terminal "${filePath}"`)
-    } else {
-      exec(`xdg-terminal --working-directory="${filePath}" || gnome-terminal --working-directory="${filePath}"`)
-    }
-  })
-
   registerFileIpc()
   registerGitIpc()
+  registerTerminalIpc()
 
   createWindow()
+
+  // Expose mainWindow for terminal IPC
+  globalThis.__mawu_mainWindow = mainWindow
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
