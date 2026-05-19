@@ -18,7 +18,6 @@ let aiInlineDecoration: string[] = []
 onMounted(async () => {
   if (!editorContainer.value) return
 
-  // Dynamic import Monaco Editor
   const monaco = await import('monaco-editor')
   monacoInstance = monaco
 
@@ -110,7 +109,11 @@ onMounted(async () => {
       showStatusBar: true,
     },
     fixedOverflowWidgets: true,
+    contextmenu: true,
   })
+
+  // ====== Chinese context menu ======
+  registerChineseContextMenu(monaco)
 
   // Content change handler
   editor.onDidChangeModelContent(() => {
@@ -139,6 +142,346 @@ onMounted(async () => {
   // Register AI glyph margin decoration
   updateGlyphMarginDecorations()
 })
+
+function registerChineseContextMenu(monaco: any) {
+  // Remove default context menu items and add Chinese ones
+  editor.addAction({
+    id: 'mawu-cut',
+    label: '剪切',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX],
+    contextMenuGroupId: '9_cutcopypaste',
+    contextMenuOrder: 1,
+    run: () => {
+      document.execCommand('cut')
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-copy',
+    label: '复制',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
+    contextMenuGroupId: '9_cutcopypaste',
+    contextMenuOrder: 2,
+    run: () => {
+      document.execCommand('copy')
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-paste',
+    label: '粘贴',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV],
+    contextMenuGroupId: '9_cutcopypaste',
+    contextMenuOrder: 3,
+    run: () => {
+      document.execCommand('paste')
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-selectAll',
+    label: '全选',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyA],
+    contextMenuGroupId: '9_cutcopypaste',
+    contextMenuOrder: 4,
+    run: () => {
+      editor.setSelection(editor.getModel().getFullModelRange())
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-undo',
+    label: '撤销',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ],
+    contextMenuGroupId: '9_undo',
+    contextMenuOrder: 1,
+    run: () => {
+      editor.trigger('keyboard', 'undo', null)
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-redo',
+    label: '重做',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ],
+    contextMenuGroupId: '9_undo',
+    contextMenuOrder: 2,
+    run: () => {
+      editor.trigger('keyboard', 'redo', null)
+    }
+  })
+
+  // AI actions
+  editor.addAction({
+    id: 'mawu-ai-annotate-full',
+    label: '✨ AI 全文代码注释',
+    contextMenuGroupId: '9_ai',
+    contextMenuOrder: 1,
+    run: () => {
+      aiAnnotateFull()
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-ai-annotate-selection',
+    label: '✨ AI 代码注释（注释选中的代码）',
+    contextMenuGroupId: '9_ai',
+    contextMenuOrder: 2,
+    run: () => {
+      aiAnnotateSelection()
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-ai-explain',
+    label: '✨ AI 解释代码',
+    contextMenuGroupId: '9_ai',
+    contextMenuOrder: 3,
+    run: () => {
+      aiExplainCode()
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-ai-optimize',
+    label: '✨ AI 优化代码',
+    contextMenuGroupId: '9_ai',
+    contextMenuOrder: 4,
+    run: () => {
+      aiOptimizeCode()
+    }
+  })
+
+  // Format
+  editor.addAction({
+    id: 'mawu-format',
+    label: '格式化文档',
+    keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+    contextMenuGroupId: '9_format',
+    contextMenuOrder: 1,
+    run: () => {
+      editor.getAction('editor.action.formatDocument')?.run()
+    }
+  })
+
+  // Find & replace
+  editor.addAction({
+    id: 'mawu-find',
+    label: '查找',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF],
+    contextMenuGroupId: '9_find',
+    contextMenuOrder: 1,
+    run: () => {
+      editor.getAction('actions.find')?.run()
+    }
+  })
+
+  editor.addAction({
+    id: 'mawu-replace',
+    label: '查找和替换',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH],
+    contextMenuGroupId: '9_find',
+    contextMenuOrder: 2,
+    run: () => {
+      editor.getAction('editor.action.startFindReplaceAction')?.run()
+    }
+  })
+
+  // Comment toggle
+  editor.addAction({
+    id: 'mawu-toggle-comment',
+    label: '切换行注释',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash],
+    contextMenuGroupId: '9_comment',
+    contextMenuOrder: 1,
+    run: () => {
+      editor.getAction('editor.action.commentLine')?.run()
+    }
+  })
+}
+
+// ====== AI Actions ======
+
+async function aiAnnotateFull() {
+  if (!editor || !monacoInstance) return
+  const model = editor.getModel()
+  if (!model) return
+
+  const fullCode = model.getValue()
+  if (!fullCode.trim()) return
+
+  editor.setSelection(model.getFullModelRange())
+  const decos = addProcessingDecoration(model.getFullModelRange())
+
+  const response = await aiStore.sendToAi(
+    `请为以下代码添加详细的中文注释，保留原始代码不变，只在需要注释的地方添加注释：\n\`\`\`\n${fullCode}\n\`\`\``,
+    '你是一个专业的编程助手。请为代码添加清晰的中文注释，直接返回添加了注释的完整代码，不要添加任何解释说明。保持原有代码逻辑不变。'
+  )
+
+  editor.deltaDecorations(decos, [])
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    // Extract code from markdown code blocks if present
+    let code = response
+    const codeMatch = response.match(/```[\w]*\n([\s\S]*?)```/)
+    if (codeMatch) {
+      code = codeMatch[1]
+    }
+    model.setValue(code)
+  }
+}
+
+async function aiAnnotateSelection() {
+  if (!editor || !monacoInstance) return
+  const model = editor.getModel()
+  if (!model) return
+
+  const selection = editor.getSelection()
+  if (!selection || selection.isEmpty()) return
+
+  const selectedCode = model.getValueInRange(selection)
+  if (!selectedCode.trim()) return
+
+  // Detect the minimum indentation of the selected code
+  const selectedLines = selectedCode.split('\n')
+  const minIndent = selectedLines.reduce((min, line) => {
+    if (line.trim().length === 0) return min
+    const indent = line.match(/^(\s*)/)?.[1] || ''
+    return min === null ? indent.length : Math.min(min, indent.length)
+  }, null as number | null)
+  const baseIndent = minIndent !== null ? ' '.repeat(minIndent) : ''
+  const targetIndent = minIndent !== null ? minIndent : 0
+
+  const decos = addProcessingDecoration(selection)
+
+  const response = await aiStore.sendToAi(
+    `请为以下选中的代码添加详细的中文注释，保留原始代码不变，只在需要注释的地方添加注释，严格保持原有的缩进格式：\n\`\`\`\n${selectedCode}\n\`\`\``,
+    '你是一个专业的编程助手。请为代码添加清晰的中文注释，直接返回添加了注释的完整代码，不要添加任何解释说明。保持原有代码逻辑和缩进不变。'
+  )
+
+  editor.deltaDecorations(decos, [])
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    let code = response
+    const codeMatch = response.match(/```[\w]*\n([\s\S]*?)```/)
+    if (codeMatch) {
+      code = codeMatch[1]
+    }
+    // Fix indentation: detect AI code's base indent and re-align to original
+    const codeLines = code.split('\n')
+    // Remove leading/trailing empty lines from AI response
+    while (codeLines.length > 0 && codeLines[0].trim().length === 0) codeLines.shift()
+    while (codeLines.length > 0 && codeLines[codeLines.length - 1].trim().length === 0) codeLines.pop()
+
+    if (codeLines.length > 0 && targetIndent > 0) {
+      // Detect the minimum indentation of AI response
+      const aiMinIndent = codeLines.reduce((min, line) => {
+        if (line.trim().length === 0) return min
+        const indent = line.match(/^(\s*)/)?.[1] || ''
+        return min === null ? indent.length : Math.min(min, indent.length)
+      }, null as number | null)
+
+      if (aiMinIndent !== null && aiMinIndent !== targetIndent) {
+        const indentDiff = targetIndent - aiMinIndent
+        const adjustedLines = codeLines.map(line => {
+          if (line.trim().length === 0) return line
+          if (indentDiff > 0) {
+            return ' '.repeat(indentDiff) + line
+          } else {
+            // Remove extra indent
+            const removeCount = -indentDiff
+            const currentIndent = line.match(/^(\s*)/)?.[1] || ''
+            if (currentIndent.length >= removeCount) {
+              return line.substring(removeCount)
+            }
+            return line
+          }
+        })
+        code = adjustedLines.join('\n')
+      }
+    } else {
+      code = codeLines.join('\n')
+    }
+
+    editor.executeEdits('ai-annotate', [{
+      range: selection,
+      text: code,
+      forceMoveMarkers: true
+    }])
+  }
+}
+
+async function aiExplainCode() {
+  if (!editor || !monacoInstance) return
+  const model = editor.getModel()
+  if (!model) return
+
+  const selection = editor.getSelection()
+  const code = selection && !selection.isEmpty()
+    ? model.getValueInRange(selection)
+    : model.getValue()
+
+  if (!code.trim()) return
+
+  // Send to AI dialog
+  aiStore.addChatMessage('user', `请解释以下代码：\n\`\`\`\n${code.substring(0, 2000)}\n\`\`\``)
+  if (!aiStore.isChatOpen) aiStore.toggleChat()
+
+  const response = await aiStore.sendToAi(
+    `请解释以下代码的功能和逻辑：\n\`\`\`\n${code.substring(0, 2000)}\n\`\`\``,
+    '你是一个专业的编程助手，请用中文清晰地解释代码。'
+  )
+  aiStore.addChatMessage('assistant', response)
+}
+
+async function aiOptimizeCode() {
+  if (!editor || !monacoInstance) return
+  const model = editor.getModel()
+  if (!model) return
+
+  const selection = editor.getSelection()
+  if (!selection || selection.isEmpty()) return
+
+  const selectedCode = model.getValueInRange(selection)
+  if (!selectedCode.trim()) return
+
+  const decos = addProcessingDecoration(selection)
+
+  const response = await aiStore.sendToAi(
+    `请优化以下代码，使其更高效、更易读：\n\`\`\`\n${selectedCode}\n\`\`\``,
+    '你是一个专业的编程助手。请优化代码，直接返回优化后的完整代码，不要添加解释说明。'
+  )
+
+  editor.deltaDecorations(decos, [])
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    let code = response
+    const codeMatch = response.match(/```[\w]*\n([\s\S]*?)```/)
+    if (codeMatch) {
+      code = codeMatch[1]
+    }
+    editor.executeEdits('ai-optimize', [{
+      range: selection,
+      text: code,
+      forceMoveMarkers: true
+    }])
+  }
+}
+
+function addProcessingDecoration(range: any): string[] {
+  return editor.deltaDecorations([], [{
+    range,
+    options: {
+      isWholeLine: true,
+      className: 'ai-processing-highlight',
+      glyphMarginClassName: 'ai-glyph-active',
+      overviewRuler: {
+        color: '#00d4ff44',
+        position: monacoInstance.editor.OverviewRulerLane.Full
+      }
+    }
+  }])
+}
 
 watch(
   () => editorStore.activeFile,
@@ -258,6 +601,10 @@ onBeforeUnmount(() => {
 
 .ai-line-highlight {
   background: rgba(0, 212, 255, 0.04) !important;
+}
+
+.ai-processing-highlight {
+  background: rgba(0, 212, 255, 0.06) !important;
 }
 
 .ai-suggestion {

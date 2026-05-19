@@ -89,6 +89,12 @@
               <span class="project-name">{{ proj.name }}</span>
               <span class="project-path">{{ proj.path }}</span>
             </div>
+            <div class="project-remove" @click.stop="removeRecent(proj.path)" title="移除记录">
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <line x1="2" y1="2" x2="10" y2="10" stroke="currentColor" stroke-width="1.2"/>
+                <line x1="10" y1="2" x2="2" y2="10" stroke="currentColor" stroke-width="1.2"/>
+              </svg>
+            </div>
           </div>
         </div>
       </div>
@@ -230,6 +236,10 @@ async function doClone() {
 
 function closeApp() {
   window.api.windowClose()
+}
+
+function removeRecent(path: string) {
+  projectStore.removeRecentProject(path)
 }
 </script>
 
@@ -401,11 +411,37 @@ function closeApp() {
   cursor: pointer;
   transition: background 0.2s;
   color: var(--mawu-text-secondary);
+  position: relative;
 }
 
 .project-item:hover {
   background: var(--mawu-bg-tertiary);
   color: var(--mawu-accent);
+}
+
+.project-remove {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.15s;
+  color: var(--mawu-text-muted);
+}
+
+.project-item:hover .project-remove {
+  opacity: 1;
+}
+
+.project-remove:hover {
+  color: var(--mawu-error);
+  background: rgba(255, 77, 79, 0.1);
 }
 
 .project-info {

@@ -69,27 +69,51 @@
                 <path d="M16 24L22 30L32 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               </svg>
               <p>选择文件开始编辑</p>
-              <p class="hint">Ctrl+S 保存 | Ctrl+P 快速打开</p>
+              <p class="hint">Ctrl+S 保存 | Ctrl+P 快速打开 | Ctrl+` 命令行</p>
             </div>
+          </div>
+        </div>
+
+        <!-- Bottom Terminal -->
+        <div class="terminal-panel" :class="{ open: terminalOpen }">
+          <div class="terminal-header">
+            <span class="terminal-title">命令行</span>
+            <div class="terminal-actions">
+              <span class="terminal-action" @click="clearTerminal" title="清除">清除</span>
+              <span class="terminal-action" @click="terminalOpen = false" title="关闭">✕</span>
+            </div>
+          </div>
+          <div class="terminal-body" ref="terminalBody">
+            <div v-for="(line, i) in terminalLines" :key="i" class="terminal-line" :class="line.type">
+              <span class="terminal-prompt" v-if="line.type === 'input'">❯&nbsp;</span>
+              <span class="terminal-text">{{ line.text }}</span>
+            </div>
+          </div>
+          <div class="terminal-input-row">
+            <span class="terminal-prompt-symbol">❯</span>
+            <input
+              class="terminal-input"
+              v-model="terminalInput"
+              @keydown.enter="executeTerminalCommand"
+              @keydown.up.prevent="historyUp"
+              @keydown.down.prevent="historyDown"
+              placeholder="输入命令..."
+              ref="terminalInputEl"
+            />
           </div>
         </div>
       </div>
 
-      <!-- AI Panel -->
-      <div class="ai-panel" :class="{ open: aiStore.isChatOpen }">
-        <div class="ai-panel-toggle" @click="aiStore.toggleChat">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-          </svg>
-        </div>
-        <AiDialog v-if="aiStore.isChatOpen" />
+      <!-- AI Panel - always visible on the right -->
+      <div class="ai-panel">
+        <AiDialog />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useEditorStore } from '@/stores/editor'
 import { useAiStore } from '@/stores/ai'
 import TitleBar from '@/components/TitleBar.vue'
@@ -103,6 +127,117 @@ const aiStore = useAiStore()
 
 const sidebarCollapsed = ref(false)
 const activeSideTab = ref<'files' | 'git'>('files')
+
+// Terminal
+const terminalOpen = ref(false)
+const terminalInput = ref('')
+const terminalInputEl = ref<HTMLInputElement | null>(null)
+const terminalBody = ref<HTMLElement | null>(null)
+const terminalLines = ref<Array<{ type: 'input' | 'output' | 'error'; text: string }>>([])
+const commandHistory = ref<string[]>([])
+const historyIndex = ref(-1)
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl+` toggle terminal
+  if (e.ctrlKey && e.code === 'Backquote') {
+    e.preventDefault()
+    terminalOpen.value = !terminalOpen.value
+    if (terminalOpen.value) {
+      nextTick(() => {
+        terminalInputEl.value?.focus()
+      })
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+})
+
+watch(terminalOpen, (val) => {
+  if (val) {
+    nextTick(() => {
+      terminalInputEl.value?.focus()
+      scrollTerminal()
+    })
+  }
+})
+
+async function executeTerminalCommand() {
+  const cmd = terminalInput.value.trim()
+  if (!cmd) return
+
+  terminalLines.value.push({ type: 'input', text: cmd })
+  commandHistory.value.push(cmd)
+  historyIndex.value = commandHistory.value.length
+  terminalInput.value = ''
+
+  // Process command
+  try {
+    if (cmd === 'clear') {
+      terminalLines.value = []
+      return
+    }
+    if (cmd === 'help') {
+      terminalLines.value.push({ type: 'output', text: '可用命令: clear, help, ai <问题>, cd <路径>, ls, pwd' })
+      return
+    }
+    if (cmd.startsWith('ai ')) {
+      const question = cmd.substring(3)
+      terminalLines.value.push({ type: 'output', text: '正在向 AI 提问...' })
+      scrollTerminal()
+      const response = await aiStore.sendToAi(question)
+      terminalLines.value.push({ type: 'output', text: response })
+      scrollTerminal()
+      return
+    }
+
+    // Execute shell command via IPC
+    const result = await window.api.executeCommand?.(cmd)
+    if (result) {
+      terminalLines.value.push({ type: 'output', text: typeof result === 'string' ? result : JSON.stringify(result) })
+    } else {
+      terminalLines.value.push({ type: 'output', text: `命令已执行: ${cmd}` })
+    }
+  } catch (e: any) {
+    terminalLines.value.push({ type: 'error', text: e.message || '执行失败' })
+  }
+
+  scrollTerminal()
+}
+
+function historyUp() {
+  if (historyIndex.value > 0) {
+    historyIndex.value--
+    terminalInput.value = commandHistory.value[historyIndex.value]
+  }
+}
+
+function historyDown() {
+  if (historyIndex.value < commandHistory.value.length - 1) {
+    historyIndex.value++
+    terminalInput.value = commandHistory.value[historyIndex.value]
+  } else {
+    historyIndex.value = commandHistory.value.length
+    terminalInput.value = ''
+  }
+}
+
+function clearTerminal() {
+  terminalLines.value = []
+}
+
+function scrollTerminal() {
+  nextTick(() => {
+    if (terminalBody.value) {
+      terminalBody.value.scrollTop = terminalBody.value.scrollHeight
+    }
+  })
+}
 </script>
 
 <style scoped>
@@ -296,31 +431,129 @@ const activeSideTab = ref<'files' | 'git'>('files')
   margin-top: 8px;
 }
 
+/* ====== AI Panel - always visible on the right ====== */
 .ai-panel {
-  display: flex;
+  width: 320px;
   background: var(--mawu-bg-primary);
   border-left: 1px solid var(--mawu-border);
-  transition: width 0.25s;
-  width: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
-.ai-panel.open {
-  width: 340px;
+/* ====== Bottom Terminal ====== */
+.terminal-panel {
+  height: 0;
+  background: var(--mawu-bg-deep);
+  border-top: 1px solid var(--mawu-border);
+  transition: height 0.2s;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.ai-panel-toggle {
-  width: 36px;
+.terminal-panel.open {
+  height: 220px;
+}
+
+.terminal-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--mawu-text-muted);
-  transition: color 0.2s;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: var(--mawu-bg-primary);
+  border-bottom: 1px solid var(--mawu-border);
   flex-shrink: 0;
 }
 
-.ai-panel-toggle:hover {
+.terminal-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mawu-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.terminal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.terminal-action {
+  font-size: 11px;
+  color: var(--mawu-text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.terminal-action:hover {
   color: var(--mawu-accent);
+}
+
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.terminal-line {
+  display: flex;
+}
+
+.terminal-line.input {
+  color: var(--mawu-text-primary);
+}
+
+.terminal-line.output {
+  color: var(--mawu-text-secondary);
+}
+
+.terminal-line.error {
+  color: var(--mawu-error);
+}
+
+.terminal-prompt {
+  color: var(--mawu-accent);
+  flex-shrink: 0;
+}
+
+.terminal-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-top: 1px solid var(--mawu-border);
+  flex-shrink: 0;
+}
+
+.terminal-prompt-symbol {
+  color: var(--mawu-accent);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  margin-right: 8px;
+}
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--mawu-text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  caret-color: var(--mawu-accent);
+}
+
+.terminal-input::placeholder {
+  color: var(--mawu-text-muted);
+  opacity: 0.5;
 }
 </style>

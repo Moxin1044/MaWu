@@ -120,4 +120,48 @@ export function registerFileIpc(): void {
       return false
     }
   })
+
+  // Recursive readdir - returns all files in project (excluding node_modules, .git, dist, etc.)
+  ipcMain.handle('fs:readdirRecursive', async (_, dirPath: string) => {
+    const ignoreDirs = new Set([
+      'node_modules', '.git', 'dist', '.nuxt', '.next', 'build', 'out',
+      '.cache', '.vscode', '.idea', '__pycache__', '.tox', 'venv', '.venv',
+      'env', '.env', 'coverage', '.coverage', 'target', 'bin', 'obj',
+      '.sass-cache', '.electron', '.electron-vite'
+    ])
+    const textExtensions = new Set([
+      '.ts', '.tsx', '.js', '.jsx', '.vue', '.svelte', '.html', '.css', '.scss',
+      '.less', '.json', '.md', '.yaml', '.yml', '.toml', '.py', '.rb', '.go',
+      '.rs', '.java', '.kt', '.swift', '.c', '.cpp', '.h', '.hpp', '.cs',
+      '.php', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+      '.sql', '.graphql', '.proto', '.lua', '.r', '.dart', '.scala',
+      '.clj', '.ex', '.exs', '.erl', '.hs', '.ml', '.fs', '.nim',
+      '.zig', '.sol', '.txt', '.csv', '.ini', '.cfg', '.conf', '.env',
+      '.gitignore', '.editorconfig', '.prettierrc', '.eslintrc', '.babelrc'
+    ])
+    const results: Array<{ path: string; relPath: string }> = []
+
+    async function walk(dir: string, relDir: string): Promise<void> {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (entry.name.startsWith('.') && entry.name !== '.env') continue
+          const fullPath = path.join(dir, entry.name)
+          const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
+          if (entry.isDirectory()) {
+            if (ignoreDirs.has(entry.name)) continue
+            await walk(fullPath, relPath)
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase()
+            if (textExtensions.has(ext) || entry.name.startsWith('.env') || entry.name === 'Dockerfile' || entry.name === 'Makefile') {
+              results.push({ path: fullPath, relPath })
+            }
+          }
+        }
+      } catch {}
+    }
+
+    await walk(dirPath, '')
+    return results
+  })
 }

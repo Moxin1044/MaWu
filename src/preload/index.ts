@@ -15,6 +15,9 @@ const api = {
   // App
   getHomeDir: () => ipcRenderer.invoke('app:getHomeDir'),
   getUserData: () => ipcRenderer.invoke('app:getUserData'),
+  executeCommand: (command: string) => ipcRenderer.invoke('app:executeCommand', command),
+  openInExplorer: (filePath: string) => ipcRenderer.invoke('app:openInExplorer', filePath),
+  openTerminal: (filePath: string) => ipcRenderer.invoke('app:openTerminal', filePath),
 
   // File system
   fs: {
@@ -29,7 +32,8 @@ const api = {
       ipcRenderer.invoke('fs:rename', oldPath, newPath),
     copy: (src: string, dest: string) => ipcRenderer.invoke('fs:copy', src, dest),
     stat: (filePath: string) => ipcRenderer.invoke('fs:stat', filePath),
-    exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath)
+    exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath),
+    readdirRecursive: (dirPath: string) => ipcRenderer.invoke('fs:readdirRecursive', dirPath)
   },
 
   // Git

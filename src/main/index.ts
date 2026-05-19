@@ -3,6 +3,7 @@ import { join, basename } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as fs from 'fs-extra'
 import * as path from 'path'
+import { exec } from 'child_process'
 import { registerFileIpc } from './ipc/file'
 import { registerGitIpc } from './ipc/git'
 
@@ -86,6 +87,35 @@ app.whenReady().then(() => {
 
   ipcMain.handle('app:getUserData', () => {
     return app.getPath('userData')
+  })
+
+  // Execute terminal command
+  ipcMain.handle('app:executeCommand', async (_, command: string) => {
+    return new Promise((resolve) => {
+      exec(command, { cwd: app.getPath('home'), timeout: 10000 }, (error: any, stdout: string, stderr: string) => {
+        if (error) {
+          resolve(stderr || error.message)
+        } else {
+          resolve(stdout || '(无输出)')
+        }
+      })
+    })
+  })
+
+  // Open in file explorer
+  ipcMain.handle('app:openInExplorer', async (_, filePath: string) => {
+    shell.openPath(filePath)
+  })
+
+  // Open terminal at path
+  ipcMain.handle('app:openTerminal', async (_, filePath: string) => {
+    if (process.platform === 'win32') {
+      exec(`start cmd /K "cd /d ${filePath}"`)
+    } else if (process.platform === 'darwin') {
+      exec(`open -a Terminal "${filePath}"`)
+    } else {
+      exec(`xdg-terminal --working-directory="${filePath}" || gnome-terminal --working-directory="${filePath}"`)
+    }
   })
 
   registerFileIpc()

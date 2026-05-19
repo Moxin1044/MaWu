@@ -17,7 +17,7 @@
           v-model="currentModelId"
           size="small"
           :options="modelOptions"
-          style="width: 110px"
+          style="width: 100px"
           @change="onModelChange"
           v-if="modelOptions.length > 0"
         />
@@ -30,6 +30,7 @@
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
         </svg>
         <p>向 AI 助手提问</p>
+        <p class="hint">可以直接让 AI 修改当前代码文件</p>
       </div>
 
       <div
@@ -44,6 +45,9 @@
         </div>
         <div class="msg-content">
           <div class="msg-text">{{ msg.content }}</div>
+          <div class="msg-actions" v-if="msg.role === 'assistant' && hasCodeBlock(msg.content)">
+            <span class="apply-btn" @click="applyCode(msg.content)">应用到当前文件</span>
+          </div>
           <div class="msg-time">{{ formatTime(msg.timestamp) }}</div>
         </div>
       </div>
@@ -61,7 +65,7 @@
     <div class="dialog-input">
       <t-textarea
         v-model="inputText"
-        placeholder="输入消息..."
+        placeholder="输入消息，如「帮我优化这段代码」..."
         :autosize="{ minRows: 1, maxRows: 4 }"
         @keydown="handleKeyDown"
       />
@@ -77,8 +81,10 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
+import { useEditorStore } from '@/stores/editor'
 
 const aiStore = useAiStore()
+const editorStore = useEditorStore()
 
 const inputText = ref('')
 const isLoading = ref(false)
@@ -102,8 +108,6 @@ function onModelChange(id: string) {
 }
 
 function openModelSetup() {
-  // Use a simple approach: emit event or directly access the setup component
-  // Since ModelSetup is in App.vue, we'll use a global event approach
   window.dispatchEvent(new CustomEvent('mawu-open-model-setup'))
 }
 
@@ -125,12 +129,32 @@ async function sendMessage() {
   await nextTick()
   scrollToBottom()
 
-  const response = await aiStore.sendToAi(text)
+  // Include current file context if a file is open
+  let context: string | undefined
+  if (editorStore.activeFile) {
+    context = `当前正在编辑的文件是 ${editorStore.activeFile.name}，文件内容如下：\n\`\`\`\n${editorStore.activeFile.content.substring(0, 3000)}\n\`\`\`\n\n如果用户要求修改代码，请直接返回修改后的完整代码，用代码块包裹。`
+  }
+
+  const response = await aiStore.sendToAi(text, context)
   aiStore.addChatMessage('assistant', response)
   isLoading.value = false
 
   await nextTick()
   scrollToBottom()
+}
+
+function hasCodeBlock(text: string): boolean {
+  return text.includes('```')
+}
+
+function applyCode(content: string) {
+  // Extract code from markdown code blocks
+  const codeMatch = content.match(/```[\w]*\n([\s\S]*?)```/)
+  if (codeMatch && editorStore.activeFilePath) {
+    const code = codeMatch[1]
+    editorStore.updateFileContent(editorStore.activeFilePath, code)
+    editorStore.saveFile(editorStore.activeFilePath)
+  }
 }
 
 function scrollToBottom() {
@@ -146,7 +170,7 @@ function formatTime(ts: number): string {
 
 <style scoped>
 .ai-dialog {
-  width: 304px;
+  width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -159,6 +183,7 @@ function formatTime(ts: number): string {
   justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid var(--mawu-border);
+  flex-shrink: 0;
 }
 
 .header-left {
@@ -213,6 +238,11 @@ function formatTime(ts: number): string {
   font-size: 13px;
 }
 
+.empty-chat .hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 .chat-message {
   display: flex;
   gap: 8px;
@@ -247,7 +277,7 @@ function formatTime(ts: number): string {
 }
 
 .msg-content {
-  max-width: 220px;
+  max-width: 240px;
 }
 
 .chat-message.user .msg-content {
@@ -268,6 +298,26 @@ function formatTime(ts: number): string {
 .chat-message.user .msg-text {
   background: rgba(0, 212, 255, 0.1);
   border: 1px solid rgba(0, 212, 255, 0.15);
+}
+
+.msg-actions {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.apply-btn {
+  font-size: 11px;
+  color: var(--mawu-accent);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.apply-btn:hover {
+  background: rgba(0, 212, 255, 0.1);
 }
 
 .msg-time {
@@ -306,6 +356,7 @@ function formatTime(ts: number): string {
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid var(--mawu-border);
+  flex-shrink: 0;
 }
 
 .dialog-input :deep(.t-textarea) {

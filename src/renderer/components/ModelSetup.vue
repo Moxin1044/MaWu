@@ -6,7 +6,7 @@
     :close-on-esc="!!aiStore.isConfigured"
     :footer="false"
     width="480px"
-    :theme="'dark'"
+    class="model-setup-dialog"
   >
     <div class="model-setup">
       <div class="setup-intro" v-if="!aiStore.isConfigured">
@@ -257,5 +257,42 @@ defineExpose({ showSetup })
 .model-actions {
   display: flex;
   gap: 4px;
+}
+</style>
+
+<style>
+/* Global styles for ModelSetup dialog - must be unscoped to penetrate TDesign Dialog */
+.model-setup-dialog .t-dialog {
+  background: #ffffff !important;
+  color: #1a1a2e !important;
+}
+
+.model-setup-dialog .t-dialog__header {
+  color: #1a1a2e !important;
+}
+
+.model-setup-dialog .t-dialog__close {
+  color: #666 !important;
+}
+
+.model-setup-dialog .t-dialog__close:hover {
+  color: #1a1a2e !important;
+}
+
+.model-setup-dialog .t-dialog__body {
+  color: #1a1a2e !important;
+}
+
+/* Select dropdown popup also white bg */
+.model-setup-dialog .t-select__list {
+  background: #ffffff !important;
+}
+
+.model-setup-dialog .t-select-option {
+  color: #1a1a2e !important;
+}
+
+.model-setup-dialog .t-select-option:hover {
+  background: #f0f6ff !important;
 }
 </style>

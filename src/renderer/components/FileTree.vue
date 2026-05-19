@@ -62,6 +62,16 @@
       <div class="ctx-sep" v-if="contextMenu.item"></div>
       <div class="ctx-item" v-if="contextMenu.item" @click="renameItem">重命名</div>
       <div class="ctx-item danger" v-if="contextMenu.item" @click="deleteItem">删除</div>
+      <div class="ctx-sep" v-if="contextMenu.item"></div>
+      <div class="ctx-item" v-if="contextMenu.item" @click="openInExplorer">在资源管理器中打开</div>
+      <div class="ctx-item" v-if="contextMenu.item" @click="openTerminalHere">在此处打开命令行</div>
+      <div class="ctx-sep" v-if="contextMenu.item"></div>
+      <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isFile" @click="translateFile('zh')">🌐 翻译当前文件为中文</div>
+      <div class="ctx-item" v-if="contextMenu.item && contextMenu.item.isFile" @click="translateFile('en')">🌐 翻译当前文件为英文</div>
+      <div class="ctx-sep" v-if="contextMenu.item"></div>
+      <div class="ctx-item" v-if="contextMenu.item" @click="generateReadme">✨ 撰写项目说明</div>
+      <div class="ctx-item" v-if="contextMenu.item" @click="translateProject('zh')">🌐 翻译项目语言为中文</div>
+      <div class="ctx-item" v-if="contextMenu.item" @click="translateProject('en')">🌐 翻译项目语言为英文</div>
     </div>
 
     <!-- Rename Dialog -->
@@ -92,11 +102,13 @@
 import { ref, onMounted, reactive } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useEditorStore } from '@/stores/editor'
+import { useAiStore } from '@/stores/ai'
 import { MessagePlugin } from 'tdesign-vue-next'
 import TreeNode from './TreeNode.vue'
 
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
+const aiStore = useAiStore()
 
 interface TreeItem {
   name: string
@@ -284,6 +296,237 @@ async function deleteItem() {
 
 async function refreshTree() {
   await loadTree()
+}
+
+function openInExplorer() {
+  if (!contextMenu.item) return
+  const targetPath = contextMenu.item.isDirectory
+    ? contextMenu.item.path
+    : contextMenu.item.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+  window.api.openInExplorer(targetPath)
+  contextMenu.visible = false
+}
+
+function openTerminalHere() {
+  if (!contextMenu.item) return
+  const targetPath = contextMenu.item.isDirectory
+    ? contextMenu.item.path
+    : contextMenu.item.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+  window.api.openTerminal(targetPath)
+  contextMenu.visible = false
+}
+
+async function translateFile(targetLang: 'zh' | 'en') {
+  contextMenu.visible = false
+  if (!contextMenu.item || !contextMenu.item.isFile) return
+
+  const langLabel = targetLang === 'zh' ? '中文' : '英文'
+  MessagePlugin.info(`正在翻译文件为${langLabel}...`)
+
+  const content = await window.api.fs.readFile(contextMenu.item.path)
+  if (!content || !content.trim()) {
+    MessagePlugin.error('文件内容为空')
+    return
+  }
+
+  let prompt: string
+  if (targetLang === 'zh') {
+    prompt = `请完整识别以下代码文件内所有代码注释、界面文字、日志文案、配置文案、提示文本、变量注释、弹窗提示等全部非代码逻辑文字内容，统一精准翻译成标准简体中文，保留原有代码结构、语法、变量名、函数名不变，仅替换语言文本，翻译通顺贴合开发项目专业用语。直接返回翻译后的完整文件内容，不要添加任何解释说明。
+
+文件内容：
+${content}`
+  } else {
+    prompt = `请完整识别以下代码文件内所有中文注释、界面中文、中文提示、中文文案、配置中文、弹窗中文等全部中文文本内容，统一翻译成标准正式商务技术英文，严格保留项目代码结构、语法、变量与函数名称不动，用词贴合行业开发专业术语，语句简洁规范。直接返回翻译后的完整文件内容，不要添加任何解释说明。
+
+文件内容：
+${content}`
+  }
+
+  const response = await aiStore.sendToAi(prompt)
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    let translated = response
+    const codeMatch = response.match(/```[\w]*\n([\s\S]*?)```/)
+    if (codeMatch) {
+      translated = codeMatch[1]
+    }
+    const success = await window.api.fs.writeFile(contextMenu.item.path, translated)
+    if (success) {
+      // Refresh file in editor if it's currently open
+      if (editorStore.activeFilePath === contextMenu.item.path) {
+        editorStore.openFile(contextMenu.item.path)
+      }
+      MessagePlugin.success('翻译完成')
+    } else {
+      MessagePlugin.error('写入文件失败')
+    }
+  } else {
+    MessagePlugin.error(response || '翻译失败')
+  }
+}
+
+function isProjectRoot(item: TreeItem) {
+  const project = projectStore.currentProject
+  if (!project) return false
+  return item.path.replace(/\\/g, '/') === project.path.replace(/\\/g, '/')
+}
+
+async function collectProjectInfo(): Promise<string> {
+  const project = projectStore.currentProject
+  if (!project) return ''
+
+  const files = await window.api.fs.readdir(project.path)
+  const fileList = files.map((f: any) => f.isDirectory ? `📁 ${f.name}/` : `📄 ${f.name}`).join('\n')
+
+  // Try to read package.json
+  let packageInfo = ''
+  try {
+    const pkgContent = await window.api.fs.readFile(project.path + '/package.json')
+    if (pkgContent) packageInfo = pkgContent
+  } catch {}
+
+  return `项目路径: ${project.path}\n项目名称: ${project.name}\n\n项目根目录文件列表:\n${fileList}${packageInfo ? `\n\npackage.json 内容:\n${packageInfo}` : ''}`
+}
+
+async function generateReadme() {
+  contextMenu.visible = false
+  const project = projectStore.currentProject
+  if (!project) return
+
+  MessagePlugin.info('正在分析项目并生成 README...')
+
+  const projectInfo = await collectProjectInfo()
+
+  const prompt = `请帮我撰写一份项目README文档，要求结构清晰、语言简洁，无需冗余内容，核心包含以下模块，每个模块内容贴合项目实际，通俗易懂，适配开发类/工具类/毕设类项目：
+1.  项目介绍：简要说明项目名称、核心用途、开发初衷（1-2段即可，不用过长）；
+2.  环境要求：明确项目运行所需的环境、依赖包/工具（简洁罗列，无需复杂说明）；
+3.  安装与启动：步骤清晰，写出具体的安装命令、启动步骤，新手能直接跟着操作；
+4.  核心功能：罗列3-5个核心功能，简要说明每个功能的作用（不用展开细节）；
+5.  注意事项：写出1-3条关键注意点（如环境配置、启动异常处理）；
+6.  免责说明（可选）：简单说明项目用途，非商业用途等。
+整体风格简洁干练，符合开发者阅读习惯，避免口语化，内容贴合我的项目（可根据项目类型调整模块详略）。
+
+以下是项目信息：
+${projectInfo}`
+
+  const response = await aiStore.sendToAi(prompt)
+
+  if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+    let content = response
+    const codeMatch = response.match(/```(?:markdown|md)?\n([\s\S]*?)```/)
+    if (codeMatch) {
+      content = codeMatch[1]
+    }
+    const readmePath = project.path + '/README.md'
+    const success = await window.api.fs.writeFile(readmePath, content)
+    if (success) {
+      refreshTree()
+      editorStore.openFile(readmePath)
+      MessagePlugin.success('README.md 已生成')
+    } else {
+      MessagePlugin.error('写入 README.md 失败')
+    }
+  } else {
+    MessagePlugin.error(response || '生成失败')
+  }
+}
+
+async function translateProject(targetLang: 'zh' | 'en') {
+  contextMenu.visible = false
+  const project = projectStore.currentProject
+  if (!project) return
+
+  const langLabel = targetLang === 'zh' ? '中文' : '英文'
+  MessagePlugin.info(`正在扫描项目文件，准备翻译为${langLabel}...`)
+
+  const allFiles = await window.api.fs.readdirRecursive(project.path)
+  if (!allFiles || allFiles.length === 0) {
+    MessagePlugin.error('未找到可翻译的文件')
+    return
+  }
+
+  // Read all file contents
+  const fileEntries: Array<{ path: string; relPath: string; content: string }> = []
+  for (const f of allFiles) {
+    const content = await window.api.fs.readFile(f.path)
+    if (content && content.trim()) {
+      fileEntries.push({ path: f.path, relPath: f.relPath, content })
+    }
+  }
+
+  if (fileEntries.length === 0) {
+    MessagePlugin.error('所有文件均为空')
+    return
+  }
+
+  // Process files in batches of 5
+  const batchSize = 5
+  let translatedCount = 0
+
+  for (let i = 0; i < fileEntries.length; i += batchSize) {
+    const batch = fileEntries.slice(i, i + batchSize)
+    const batchLabel = `(${Math.min(i + batchSize, fileEntries.length)}/${fileEntries.length})`
+    MessagePlugin.info(`正在翻译 ${batchLabel}...`)
+
+    const fileInfos = batch.map(f => `--- 文件: ${f.relPath} ---\n${f.content}`).join('\n\n')
+
+    let prompt: string
+    if (targetLang === 'zh') {
+      prompt = `请完整识别当前整个项目内所有代码注释、界面文字、日志文案、配置文案、提示文本、变量注释、弹窗提示等全部非代码逻辑文字内容，统一精准翻译成标准简体中文，保留原有代码结构、语法、变量名、函数名不变，仅替换语言文本，翻译通顺贴合开发项目专业用语。
+
+请严格按以下格式返回每个文件的翻译结果，不要遗漏任何文件：
+===FILE: 文件相对路径===
+翻译后的完整文件内容
+===ENDFILE===
+
+以下是所有文件内容：
+${fileInfos}`
+    } else {
+      prompt = `请完整识别当前整个项目内所有中文注释、界面中文、中文提示、中文文案、配置中文、弹窗中文等全部中文文本内容，统一翻译成标准正式商务技术英文，严格保留项目代码结构、语法、变量与函数名称不动，用词贴合行业开发专业术语，语句简洁规范。
+
+请严格按以下格式返回每个文件的翻译结果，不要遗漏任何文件：
+===FILE: 文件相对路径===
+翻译后的完整文件内容
+===ENDFILE===
+
+以下是所有文件内容：
+${fileInfos}`
+    }
+
+    const response = await aiStore.sendToAi(prompt)
+
+    if (response && response !== '请先配置AI模型' && !response.startsWith('请求失败')) {
+      // Parse the response and extract file contents
+      const fileRegex = /===FILE:\s*(.+?)===\n([\s\S]*?)===ENDFILE===/g
+      let match
+      while ((match = fileRegex.exec(response)) !== null) {
+        const relPath = match[1].trim()
+        let newContent = match[2]
+        // Remove trailing newline if present
+        if (newContent.endsWith('\n')) {
+          newContent = newContent.slice(0, -1)
+        }
+        const fileEntry = batch.find(f => f.relPath === relPath)
+        if (fileEntry && newContent.trim()) {
+          // Extract from code block if wrapped
+          let finalContent = newContent
+          const codeMatch = newContent.match(/```[\w]*\n([\s\S]*?)```/)
+          if (codeMatch) {
+            finalContent = codeMatch[1]
+          }
+          const success = await window.api.fs.writeFile(fileEntry.path, finalContent)
+          if (success) translatedCount++
+        }
+      }
+    }
+  }
+
+  refreshTree()
+  if (translatedCount > 0) {
+    MessagePlugin.success(`翻译完成，共更新 ${translatedCount} 个文件`)
+  } else {
+    MessagePlugin.warning('未检测到需要翻译的内容')
+  }
 }
 </script>
 

@@ -12,6 +12,9 @@ declare global {
 
       getHomeDir: () => Promise<string>
       getUserData: () => Promise<string>
+      executeCommand: (command: string) => Promise<string>
+      openInExplorer: (filePath: string) => Promise<void>
+      openTerminal: (filePath: string) => Promise<void>
 
       fs: {
         readdir: (dirPath: string) => Promise<FileEntry[]>
@@ -24,6 +27,7 @@ declare global {
         copy: (src: string, dest: string) => Promise<boolean>
         stat: (filePath: string) => Promise<FileStat | null>
         exists: (filePath: string) => Promise<boolean>
+        readdirRecursive: (dirPath: string) => Promise<Array<{ path: string; relPath: string }>>
       }
 
       git: {

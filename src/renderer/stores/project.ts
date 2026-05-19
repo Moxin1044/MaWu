@@ -52,6 +52,11 @@ export const useProjectStore = defineStore('project', () => {
     } catch {}
   }
 
+  function removeRecentProject(path: string) {
+    recentProjects.value = recentProjects.value.filter((p) => p.path !== path)
+    saveRecentProjects()
+  }
+
   return {
     currentProject,
     recentProjects,
@@ -59,6 +64,7 @@ export const useProjectStore = defineStore('project', () => {
     projectName,
     openProject,
     closeProject,
+    removeRecentProject,
     loadHomeDir,
     loadRecentProjects
   }
